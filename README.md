@@ -1,8 +1,8 @@
-MailFlow AI // Donghyun | Seunghoon
+# MailFlow AI // Donghyun | Seunghoon
 
 MailFlow AI is a simple email assistant that reduces repetitive work by organizing incoming emails and generating personalized replies.
 
-Main Features
+## Main Features
 
 1. Daily Briefing
 
