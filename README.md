@@ -98,3 +98,5 @@ Provide Korean and English replies
 
 The goal of MailFlow AI is to make email management faster and easier while keeping the user in control of every reply.
 
+
+Jira: https://stonybrook-team-ez6z21om.atlassian.net/jira/software/projects/SCRUM/boards/1/backlog?atlOrigin=eyJpIjoiMTE4MWJjNmUyMmU0NGJkZThhM2FjYWI4Y2ZiN2Y2MWYiLCJwIjoiaiJ9
