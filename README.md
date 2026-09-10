@@ -30,7 +30,7 @@ An AI-generated reply
 
 An editable reply before sending
 
-What Makes It Different?
+## What Makes It Different?
 
 Minimal UI: Only the essential information and actions are displayed.
 
@@ -48,7 +48,7 @@ The application connects to Gmail through the Gmail API and Google OAuth 2.0. Us
 
 For safety, AI-generated replies are shown as drafts and require user confirmation before they are sent.
 
-Suggested Tech Stack
+## Suggested Tech Stack
 
 Frontend: React, Vite, CSS
 
