@@ -74,7 +74,7 @@ Adjust the reply tone and length.
 
 Review, edit, and send the reply.
 
-Planned Pages
+## Planned Pages
 
 Daily Briefing  ->  All Emails  ->  Email Detail
                                       |- AI Summary
@@ -82,7 +82,7 @@ Daily Briefing  ->  All Emails  ->  Email Detail
                                       |- Tone Slider
                                       `- Length Slider
 
-Future Improvements
+## Future Improvements
 
 Learn the user's writing style from sent emails
 
@@ -94,7 +94,7 @@ Add reply scheduling
 
 Provide Korean and English replies
 
-Project Goal
+## Project Goal
 
 The goal of MailFlow AI is to make email management faster and easier while keeping the user in control of every reply.
 
