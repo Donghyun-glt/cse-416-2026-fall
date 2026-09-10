@@ -3,7 +3,7 @@
 > A simpler way to understand, organize, and respond to email.
 
 **CSE 416 · Fall 2026**  
-**Team:** Donghyun Lim · Seunghoon
+**Team:** Donghyun Lim · Seunghoon Jang
 
 ---
 
@@ -17,7 +17,7 @@ People spend too much time sorting crowded inboxes, finding important informatio
 
 <div align="center">
 
-## 🚀 Follow Our Development Progress
+## Follow Our Development Progress
 
 <a href="https://stonybrook-team-ez6z21om.atlassian.net/jira/software/projects/SCRUM/boards/1/backlog?atlOrigin=eyJpIjoiMTE4MWJjNmUyMmU0NGJkZThhM2FjYWI4Y2ZiN2Y2MWYiLCJwIjoiaiJ9">
   <img src="https://img.shields.io/badge/OPEN_THE_JIRA_BOARD-0052CC?style=for-the-badge&logo=jira&logoColor=white" alt="Open the MailFlow AI Jira Board">
@@ -31,21 +31,21 @@ People spend too much time sorting crowded inboxes, finding important informatio
 
 ## Core Features
 
-### 🌅 1. Daily Briefing
+### 1. Daily Briefing
 
 - Collects emails received today.
 - Summarizes the most important information.
 - Sorts messages into **Urgent**, **FYI**, and **Low Priority**.
 - Helps users understand what needs attention at a glance.
 
-### 📥 2. All Emails
+### 2. All Emails
 
 - Imports messages directly from Gmail.
 - Presents them in a clean, minimal inbox.
 - Clearly displays each email's priority category.
 - Lets users quickly find and open a message.
 
-### ✨ 3. AI Summary and Reply
+### 3. AI Summary and Reply
 
 When the user opens an email, MailFlow AI provides:
 
@@ -54,7 +54,7 @@ When the user opens an email, MailFlow AI provides:
 - An editable draft that must be reviewed before sending.
 - Controls for adjusting the reply's tone and length.
 
-### 📅 4. Email-to-Calendar
+### 4. Email-to-Calendar
 
 - Detects important dates, deadlines, appointments, and meetings in incoming emails.
 - Extracts useful event details such as the title, date, time, and location.
@@ -65,11 +65,11 @@ When the user opens an email, MailFlow AI provides:
 
 | Feature | What it provides |
 | --- | --- |
-| 🧘 **Minimal interface** | Displays only the information and actions the user needs. |
-| 🎚️ **Flexible reply controls** | Horizontal sliders adjust tone from **Friendly → Professional** and length from **Short → Detailed**. |
-| 🖊️ **Personalized writing style** | Optionally learns patterns from previously sent emails and reflects the user's style in future drafts. |
-| 🗓️ **Calendar awareness** | Recognizes dates and schedules in email, then prepares a Google Calendar event instead of making the user enter it manually. |
-| ✅ **Human approval** | Keeps replies and calendar events as suggestions until the user reviews and confirms them. |
+| **Minimal interface** | Displays only the information and actions the user needs. |
+| **Flexible reply controls** | Horizontal sliders adjust tone from **Friendly → Professional** and length from **Short → Detailed**. |
+| **Personalized writing style** | Optionally learns patterns from previously sent emails and reflects the user's style in future drafts. |
+| **Calendar awareness** | Recognizes dates and schedules in email, then prepares a Google Calendar event instead of making the user enter it manually. |
+| **Human approval** | Keeps replies and calendar events as suggestions until the user reviews and confirms them. |
 
 ## Future Improvements
 
@@ -85,6 +85,6 @@ MailFlow AI aims to make email management faster and less repetitive while ensur
 
 ## Project Links
 
-### [➡️ Open the MailFlow AI Jira Board](https://stonybrook-team-ez6z21om.atlassian.net/jira/software/projects/SCRUM/boards/1/backlog?atlOrigin=eyJpIjoiMTE4MWJjNmUyMmU0NGJkZThhM2FjYWI4Y2ZiN2Y2MWYiLCJwIjoiaiJ9)
+### [Open the MailFlow AI Jira Board](https://stonybrook-team-ez6z21om.atlassian.net/jira/software/projects/SCRUM/boards/1/backlog?atlOrigin=eyJpIjoiMTE4MWJjNmUyMmU0NGJkZThhM2FjYWI4Y2ZiN2Y2MWYiLCJwIjoiaiJ9)
 
 Use the Jira board to review our current sprint, upcoming work, individual responsibilities, and development progress.
