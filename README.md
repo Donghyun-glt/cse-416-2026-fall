@@ -1,17 +1,9 @@
-<div align="center">
-
 # ✉️ MailFlow AI
 
-### A simpler way to understand, organize, and respond to email
+> A simpler way to understand, organize, and respond to email.
 
-![Project](https://img.shields.io/badge/CSE_416-Team_Project-635BFF?style=for-the-badge)
-![Gmail](https://img.shields.io/badge/Gmail-Connected-EA4335?style=for-the-badge&logo=gmail&logoColor=white)
-![Calendar](https://img.shields.io/badge/Google_Calendar-Smart_Events-4285F4?style=for-the-badge&logo=googlecalendar&logoColor=white)
-![Safety](https://img.shields.io/badge/AI_Output-User_Approved-22A06B?style=for-the-badge)
-
-**Donghyun Lim · Seunghoon**
-
-</div>
+**CSE 416 · Fall 2026**  
+**Team:** Donghyun Lim · Seunghoon
 
 ---
 
@@ -22,9 +14,6 @@
 ## Problem & Solution
 
 People spend too much time sorting crowded inboxes, finding important information, and writing repetitive replies. As a result, urgent messages and deadlines can easily be overlooked. MailFlow AI solves this problem by prioritizing and summarizing emails, drafting replies, and converting detected dates into suggested Google Calendar events. The user reviews and approves every reply and calendar event before any action is taken.
-
-> [!IMPORTANT]
-> MailFlow AI keeps the user in control. AI-generated replies and calendar events are presented for review before they are sent or created.
 
 <div align="center">
 
