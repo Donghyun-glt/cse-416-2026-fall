@@ -61,6 +61,22 @@ When the user opens an email, MailFlow AI provides:
 - Shows a preview so the user can verify or edit the information.
 - Adds the approved event to **Google Calendar**.
 
+## Tech Stack
+```
+Next.js Frontend
+ ├─ Daily Briefing
+ ├─ Inbox / Email Detail
+ ├─ Reply Editor + Tone/Length sliders
+ └─ Calendar Event Preview
+
+NestJS Backend
+ ├─ Auth Module (Google OAuth)
+ ├─ Gmail Module
+ ├─ AI Module (summary, priority, reply, date extraction)
+ ├─ Calendar Module
+ └─ User / Draft / Approval Module
+ ```
+
 ## What Makes It Different?
 
 | Feature | What it provides |
