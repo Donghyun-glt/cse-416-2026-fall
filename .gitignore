@@ -1,0 +1,13 @@
+# Local environment variables and secrets
+.env*
+!.env.example
+
+# Dependencies and Next.js build output
+node_modules/
+.next/
+out/
+
+# Local tooling
+.DS_Store
+*.log
+
