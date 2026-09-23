@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getGmailSession } from "@/lib/gmail-session";
+import { Calendar } from "./calendar";
 import { MailClient } from "./mail-client";
 
 export default async function Home() {
@@ -7,8 +8,8 @@ export default async function Home() {
   const connected = Boolean(sessionId && getGmailSession(sessionId));
 
   return (
-    <main className="min-h-screen bg-slate-50 px-5 py-14 text-slate-950 sm:px-8">
-      <div className="mx-auto max-w-4xl">
+    <main className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 px-5 py-14 text-slate-950 sm:px-8">
+      <div className="mx-auto max-w-7xl">
         <header className="mb-10">
           <p className="mb-3 text-sm font-bold uppercase tracking-[0.2em] text-blue-600">
             MailFlow AI
@@ -21,7 +22,14 @@ export default async function Home() {
           </p>
         </header>
 
-        <MailClient initialConnected={connected} />
+        <div className="grid items-start gap-6 lg:grid-cols-[640px_minmax(0,1fr)]">
+          {/* Sticky on desktop: the mail list scrolls far past the calendar. */}
+          <div className="lg:sticky lg:top-8">
+            <Calendar />
+          </div>
+
+          <MailClient initialConnected={connected} />
+        </div>
       </div>
     </main>
   );
