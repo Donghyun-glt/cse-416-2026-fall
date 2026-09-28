@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createGoogleOAuthClient, GMAIL_READONLY_SCOPE } from "@/lib/google";
+import {
+  createGoogleOAuthClient,
+  GMAIL_MODIFY_SCOPE,
+  GOOGLE_PROFILE_SCOPES,
+} from "@/lib/google";
 
 export async function GET() {
   const state = randomBytes(32).toString("hex");
@@ -9,7 +13,7 @@ export async function GET() {
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: true,
-    scope: [GMAIL_READONLY_SCOPE],
+    scope: [GMAIL_MODIFY_SCOPE, ...GOOGLE_PROFILE_SCOPES],
     state,
   });
 

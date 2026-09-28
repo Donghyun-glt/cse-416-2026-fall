@@ -13,6 +13,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const afterParam = request.nextUrl.searchParams.get("after");
+    const after = afterParam ? Number(afterParam) : Number.NaN;
+    const afterSeconds = Number.isFinite(after) && after > 0
+      ? Math.floor(after / 1000)
+      : undefined;
+    const requestedMode = request.nextUrl.searchParams.get("mode");
+    const mailboxMode = requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash"
+      ? requestedMode
+      : "all";
+    const requestedPageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
+
     const oauth2Client = createGoogleOAuthClient();
     oauth2Client.setCredentials(tokens);
     oauth2Client.on("tokens", (newTokens) => {
@@ -20,27 +31,61 @@ export async function GET(request: NextRequest) {
     });
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-    const list = await gmail.users.messages.list({
-      userId: "me",
-      labelIds: ["INBOX"],
-      maxResults: 10,
-    });
+    const messageIds: string[] = [];
+    let pageToken = requestedPageToken;
+    let nextPageToken: string | undefined;
+    let resultSizeEstimate: number | undefined;
+    const isDailyBriefing = Boolean(afterSeconds);
+    const labelIds = isDailyBriefing
+      ? ["INBOX"]
+      : mailboxMode === "starred"
+        ? ["STARRED"]
+        : mailboxMode === "drafts"
+          ? ["DRAFT"]
+        : mailboxMode === "trash"
+          ? ["TRASH"]
+          : undefined;
+
+    do {
+      const list = await gmail.users.messages.list({
+        userId: "me",
+        labelIds,
+        includeSpamTrash: mailboxMode === "trash",
+        maxResults: isDailyBriefing ? 100 : 50,
+        pageToken,
+        q: afterSeconds ? `after:${afterSeconds}` : undefined,
+      });
+
+      messageIds.push(
+        ...(list.data.messages ?? []).flatMap(({ id }) => (id ? [id] : [])),
+      );
+      nextPageToken = list.data.nextPageToken ?? undefined;
+      resultSizeEstimate = list.data.resultSizeEstimate ?? undefined;
+      pageToken = isDailyBriefing ? nextPageToken : undefined;
+    } while (isDailyBriefing && pageToken);
 
     const messages = await Promise.all(
-      (list.data.messages ?? []).map(async ({ id }) => {
-        if (!id) return null;
+      messageIds.map(async (id) => {
         const result = await gmail.users.messages.get({
           userId: "me",
           id,
           format: "full",
         });
-        return parseGmailMessage(result.data);
+        const message = parseGmailMessage(result.data);
+        const receivedAt = Number(result.data.internalDate ?? 0);
+        return !afterSeconds || receivedAt >= afterSeconds * 1000 ? message : null;
       }),
     );
 
+    const filteredMessages = messages.filter((message) => message !== null);
+
     return NextResponse.json({
       connected: true,
-      messages: messages.filter((message) => message !== null),
+      messages: isDailyBriefing
+        ? filteredMessages.sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        : filteredMessages,
+      nextPageToken: !isDailyBriefing ? nextPageToken : undefined,
+      resultSizeEstimate: !isDailyBriefing ? resultSizeEstimate : undefined,
     });
   } catch (gmailError) {
     console.error("Gmail API request failed", gmailError);

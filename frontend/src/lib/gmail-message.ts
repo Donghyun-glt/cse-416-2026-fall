@@ -145,8 +145,8 @@ function buildEmailDocument(bodyHtml: string) {
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Apple SD Gothic Neo", "Malgun Gothic", "Helvetica Neue", Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 15px;
+    line-height: 1.65;
     color: #202124;
     overflow-x: auto;
     word-break: break-word;
@@ -186,6 +186,8 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
     from: headers.get("from") || "알 수 없는 발신자",
     date: headers.get("date") || "",
     snippet: message.snippet ?? "",
+    unread: message.labelIds?.includes("UNREAD") ?? false,
+    starred: message.labelIds?.includes("STARRED") ?? false,
     html: buildEmailDocument(content),
   };
 }

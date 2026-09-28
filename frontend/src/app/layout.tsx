@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "MailFlow AI",
-  description: "Connect Gmail and review recent messages.",
+  description: "Start every day with a clear view of your inbox.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
