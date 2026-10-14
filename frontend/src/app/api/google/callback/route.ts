@@ -3,23 +3,27 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { saveGmailSession } from "@/lib/gmail-session";
 
-function redirectWithError(request: NextRequest, error: string) {
-  const url = new URL("/", request.url);
-  url.searchParams.set("error", error);
-  return NextResponse.redirect(url);
+function redirectAfterLogin(request: NextRequest, error?: string) {
+  const popup = request.cookies.get("gmail_oauth_popup")?.value === "1";
+  const url = new URL(popup ? "/auth/google/complete" : "/", request.url);
+  if (error) url.searchParams.set("error", error);
+  const response = NextResponse.redirect(url);
+  response.cookies.delete("gmail_oauth_state");
+  response.cookies.delete("gmail_oauth_popup");
+  return response;
 }
 
 export async function GET(request: NextRequest) {
   const error = request.nextUrl.searchParams.get("error");
-  if (error) return redirectWithError(request, error);
-
   const code = request.nextUrl.searchParams.get("code");
   const returnedState = request.nextUrl.searchParams.get("state");
   const savedState = request.cookies.get("gmail_oauth_state")?.value;
 
-  if (!code || !returnedState || !savedState || returnedState !== savedState) {
-    return redirectWithError(request, "invalid_oauth_state");
+  if (!returnedState || !savedState || returnedState !== savedState) {
+    return redirectAfterLogin(request, "invalid_oauth_state");
   }
+  if (error) return redirectAfterLogin(request, error);
+  if (!code) return redirectAfterLogin(request, "invalid_oauth_state");
 
   try {
     const oauth2Client = createGoogleOAuthClient();
@@ -27,8 +31,7 @@ export async function GET(request: NextRequest) {
     const sessionId = randomBytes(32).toString("hex");
     saveGmailSession(sessionId, tokens);
 
-    const response = NextResponse.redirect(new URL("/", request.url));
-    response.cookies.delete("gmail_oauth_state");
+    const response = redirectAfterLogin(request);
     response.cookies.set("gmail_session", sessionId, {
       httpOnly: true,
       sameSite: "lax",
@@ -40,7 +43,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (oauthError) {
     console.error("Google OAuth callback failed", oauthError);
-    return redirectWithError(request, "token_exchange_failed");
+    return redirectAfterLogin(request, "token_exchange_failed");
   }
 }
 

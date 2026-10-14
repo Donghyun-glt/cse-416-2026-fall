@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GoogleLoginButton } from "./google-login-button";
 
 type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean };
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
@@ -119,7 +120,7 @@ function MailDetail({ message, deleting, error, onBack, onDelete }: { message: M
   );
 }
 
-export function MailClient({ initialConnected }: { initialConnected: boolean }) {
+export function MailClient({ initialConnected, loginError }: { initialConnected: boolean; loginError?: string }) {
   const [messages, setMessages] = useState<Mail[]>([]);
   const [connected, setConnected] = useState(initialConnected);
   const [loading, setLoading] = useState(initialConnected);
@@ -376,7 +377,7 @@ export function MailClient({ initialConnected }: { initialConnected: boolean }) 
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#5944d8] text-white"><Icon name="mail" className="h-7 w-7" /></div>
           <h1 className="mt-6 text-3xl font-extrabold tracking-tight">Welcome to MailFlow AI</h1>
           <p className="mt-3 text-sm leading-6 text-[#858178]">Connect Gmail to open your daily briefing and see new messages from today.</p>
-          <a href="/api/google/connect" className="mt-7 inline-flex rounded-xl bg-[#5944d8] px-6 py-3 text-sm font-bold text-white transition hover:bg-[#4936c2]">Connect Gmail</a>
+          <GoogleLoginButton initialError={loginError} />
         </div>
       </main>
     );

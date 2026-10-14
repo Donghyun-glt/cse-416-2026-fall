@@ -77,6 +77,15 @@ NestJS Backend
  └─ User / Draft / Approval Module
  ```
 
+## Run locally
+
+```bash
+npm --prefix frontend install
+npm run dev
+```
+
+Open http://localhost:3000. Google sign-in also requires the OAuth settings described in [frontend/README.md](frontend/README.md).
+
 ## What Makes It Different?
 
 | Feature | What it provides |
