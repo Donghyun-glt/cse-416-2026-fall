@@ -2,12 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
+import { comparePriority, type Priority } from "@/lib/mail-priority";
 
-type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean };
-type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
+type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean; draft: boolean; priority: Priority };
+type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number; sortingPending?: boolean };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
 type View = "briefing" | "all" | "starred" | "drafts" | "trash";
+
+const priorityDisplay: Record<Priority, { label: string; className: string }> = {
+  urgent: { label: "Urgent", className: "bg-[#fce9e9] text-[#a82f35]" },
+  fyi: { label: "FYI", className: "bg-[#fbf2dc] text-[#89651f]" },
+  low: { label: "Low Priority", className: "bg-[#e8f1ee] text-[#416c60]" },
+};
+
+function PriorityBadge({ priority }: { priority: Priority }) {
+  const display = priorityDisplay[priority];
+  return <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${display.className}`}>{display.label}</span>;
+}
 
 function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "calendar" | "trash" | "back" | "star" | "draft"; className?: string }) {
   const paths = {
@@ -92,7 +104,7 @@ function TodayCard() {
   );
 }
 
-function MailDetail({ message, deleting, error, onBack, onDelete }: { message: Mail; deleting: boolean; error: string | null; onBack: () => void; onDelete?: () => void }) {
+function MailDetail({ message, deleting, error, onBack, onDelete, onPriorityChange }: { message: Mail; deleting: boolean; error: string | null; onBack: () => void; onDelete?: () => void; onPriorityChange: (priority: Priority) => void }) {
   const sender = formatSender(message.from);
   const date = new Date(message.date);
   const fullTime = Number.isNaN(date.getTime())
@@ -109,6 +121,11 @@ function MailDetail({ message, deleting, error, onBack, onDelete }: { message: M
       <article className="mx-auto max-w-[1050px] px-5 py-8 md:px-10 md:py-12">
         {error && <p className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
         <h1 className="text-2xl font-semibold leading-tight tracking-[-0.025em] text-[#282722] md:text-[34px]">{message.subject}</h1>
+        {!message.draft && <label className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#68645d]">Priority
+          <select value={message.priority} onChange={(event) => onPriorityChange(event.target.value as Priority)} className="rounded-lg border border-[#dedbd4] bg-white px-3 py-2 text-sm text-[#302f2a]">
+            <option value="urgent">Urgent</option><option value="fyi">FYI</option><option value="low">Low Priority</option>
+          </select>
+        </label>}
         <div className="mt-8 flex items-start gap-4 border-b border-[#eceae5] pb-6">
           <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#5944d8] text-sm font-extrabold text-white">{initials(sender)}</span>
           <div className="min-w-0 flex-1"><p className="font-bold text-[#302f2a]">{sender}</p><p className="mt-1 break-all text-sm text-[#87837a]">{message.from}</p></div>
@@ -134,6 +151,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [allPageTokens, setAllPageTokens] = useState([""]);
   const [allPageIndex, setAllPageIndex] = useState(0);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [sortingPending, setSortingPending] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
 
@@ -146,7 +164,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     try {
       const query = targetView === "briefing"
         ? `?after=${startOfToday()}`
-        : `?mode=${targetView}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+        : targetView === "all"
+          ? `?mode=all&page=${allPageIndex}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`
+          : `?mode=${targetView}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
       const response = await fetch(`/api/gmail/messages${query}`, { cache: "no-store", signal: controller.signal });
       const data = (await response.json()) as MailResponse;
       if (response.status === 401) {
@@ -158,6 +178,8 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       const nextMessages = data.messages ?? [];
       setConnected(true);
       setMessages(nextMessages);
+      if (targetView === "all") setSortingPending(Boolean(data.sortingPending));
+      else setSortingPending(false);
       if (showLoading) {
         setSelectedIds(new Set());
       } else {
@@ -166,7 +188,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setSelectedMail((current) => {
           if (!current) return null;
           const synced = nextMessages.find((message) => message.id === current.id);
-          return synced ? { ...synced, html: current.html } : null;
+          return synced ? { ...synced, html: current.html } : current;
         });
       }
       if (targetView !== "briefing") {
@@ -181,7 +203,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setLoading(false);
       }
     }
-  }, []);
+  }, [allPageIndex]);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -228,7 +250,10 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   useEffect(() => {
     if (!connected) return;
     const pageToken = view === "briefing" ? "" : allPageTokens[allPageIndex];
-    const syncCurrentMailbox = () => void loadMessages(view, false, pageToken);
+    const syncCurrentMailbox = () => {
+      if (requestRef.current) return;
+      void loadMessages(view, false, pageToken);
+    };
     const interval = window.setInterval(syncCurrentMailbox, 15_000);
     const refreshWhenVisible = () => { if (document.visibilityState === "visible") syncCurrentMailbox(); };
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -238,6 +263,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const fullDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
   const changeView = (next: View) => {
     setView(next);
+    setSortingPending(false);
     setSelectedMail(null);
     setSelectedIds(new Set());
     if (next !== "briefing") {
@@ -306,6 +332,26 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     } catch (starError) {
       setMessages((current) => current.map((item) => item.id === message.id ? { ...item, starred: message.starred } : item));
       setError(starError instanceof Error ? starError.message : "별표 상태를 저장하지 못했습니다.");
+    }
+  };
+  const changePriority = async (priority: Priority) => {
+    if (!selectedMail || selectedMail.priority === priority) return;
+    const previous = selectedMail;
+    setSelectedMail({ ...previous, priority });
+    setMessages((current) => current.map((message) => message.id === previous.id ? { ...message, priority } : message).sort(comparePriority));
+    setError(null);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(previous.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "priority", priority }),
+      });
+      if (!response.ok) throw new Error("Priority could not be saved.");
+      if (view === "all") void loadMessages("all", false);
+    } catch (changeError) {
+      setSelectedMail((current) => current?.id === previous.id ? { ...current, priority: previous.priority } : current);
+      setMessages((current) => current.map((message) => message.id === previous.id ? { ...message, priority: previous.priority } : message));
+      setError(changeError instanceof Error ? changeError.message : "Priority could not be saved.");
     }
   };
   const moveSelectedMailToTrash = async () => {
@@ -411,6 +457,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
             error={error}
             onBack={() => setSelectedMail(null)}
             onDelete={view === "trash" ? undefined : () => void moveSelectedMailToTrash()}
+            onPriorityChange={(priority) => void changePriority(priority)}
           />
         ) : (
           <>
@@ -420,6 +467,10 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           {view === "briefing" && <TodayCard />}
           <section>
             <div className="mb-3">{view === "briefing" && <h2 className="text-base font-extrabold">Today&apos;s emails</h2>}<p className="mt-0.5 text-xs text-[#9a968c]">{loading ? "Syncing your inbox…" : view === "briefing" ? `${messages.length} message${messages.length === 1 ? "" : "s"} · Updates automatically` : `Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`}</p></div>
+            {view === "all" && sortingPending && <p className="mb-3 rounded-xl bg-[#eeecfb] px-4 py-3 text-sm text-[#5742d5]">Showing recent mail while priorities are being sorted across your mailbox.</p>}
+            {view === "briefing" && <div className="mb-4 flex flex-wrap gap-2" aria-label="Today's priority counts">
+              {(["urgent", "fyi", "low"] as const).map((priority) => <span key={priority} className={`rounded-full px-3 py-1.5 text-xs font-bold ${priorityDisplay[priority].className}`}>{messages.filter((message) => message.priority === priority).length} {priorityDisplay[priority].label}</span>)}
+            </div>}
             {error && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
             {view === "trash" && <p className="mb-3 rounded-xl bg-[#ececea] px-4 py-3 text-center text-sm text-[#6f6b64]">Messages in Trash are automatically deleted after 30 days.</p>}
             {view !== "briefing" && <div className="sticky top-0 z-20 mb-3 flex h-12 items-center justify-between rounded-xl border border-[#e1ded8] bg-white/95 px-4 shadow-[0_3px_12px_rgba(31,31,27,0.08)] backdrop-blur">
@@ -431,10 +482,12 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
                 const sender = formatSender(message.from);
                 const color = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"][index % 5];
                 const rowTone = !message.unread ? "bg-[#f1f1ef] hover:bg-[#eaeae7]" : "bg-white hover:bg-[#faf9f6]";
+                const startsGroup = index === 0 || messages[index - 1].priority !== message.priority;
                 return <article key={message.id} className={index ? "border-t border-[#deddd9]" : ""}>
+                  {startsGroup && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
-                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span><time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
+                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
                   </div>
                 </article>;
               })}

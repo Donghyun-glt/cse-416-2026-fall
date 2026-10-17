@@ -2,6 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
+import { ensurePriorityLabels, setPriority } from "@/lib/gmail-priority";
+import { invalidatePriorityIndex, removeFromPriorityIndex, updatePriorityIndex } from "@/lib/priority-index";
+import { isPriority } from "@/lib/mail-priority";
 
 async function getAuthorizedGmail(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
@@ -26,11 +29,22 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({})) as {
-      action?: "read" | "star" | "restore";
+      action?: "read" | "star" | "restore" | "priority";
       starred?: boolean;
+      priority?: unknown;
     };
+    if (body.action === "priority") {
+      if (!isPriority(body.priority)) return NextResponse.json({ error: "invalid_priority" }, { status: 400 });
+      const labels = await ensurePriorityLabels(gmail);
+      await setPriority(gmail, id, body.priority, labels);
+      const sessionId = request.cookies.get("gmail_session")?.value;
+      if (sessionId) updatePriorityIndex(sessionId, id, body.priority);
+      return NextResponse.json({ priority: body.priority });
+    }
     if (body.action === "restore") {
       await gmail.users.messages.untrash({ userId: "me", id });
+      const sessionId = request.cookies.get("gmail_session")?.value;
+      if (sessionId) invalidatePriorityIndex(sessionId);
       return NextResponse.json({ restored: true });
     }
     const isStarAction = body.action === "star";
@@ -62,6 +76,8 @@ export async function DELETE(
   try {
     const { id } = await params;
     await gmail.users.messages.trash({ userId: "me", id });
+    const sessionId = request.cookies.get("gmail_session")?.value;
+    if (sessionId) removeFromPriorityIndex(sessionId, id);
     return NextResponse.json({ trashed: true });
   } catch (gmailError) {
     console.error("Gmail trash request failed", gmailError);

@@ -188,6 +188,7 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
     snippet: message.snippet ?? "",
     unread: message.labelIds?.includes("UNREAD") ?? false,
     starred: message.labelIds?.includes("STARRED") ?? false,
+    draft: message.labelIds?.includes("DRAFT") ?? false,
     html: buildEmailDocument(content),
   };
 }
