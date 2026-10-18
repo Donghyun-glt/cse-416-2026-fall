@@ -7,14 +7,12 @@ const vm = require("node:vm");
 const ts = require("typescript");
 const nextServer = require("next/server");
 
-test("All Emails returns a page before mailbox-wide indexing finishes", async () => {
-  const scheduled = [];
-  let indexStarted = false;
+test("All Emails preserves Gmail order while attaching priority labels", async () => {
   const gmail = {
     users: {
       messages: {
-        list: async () => ({ data: { messages: [{ id: "mail-1" }], nextPageToken: "next", resultSizeEstimate: 2000 } }),
-        get: async () => ({ data: { id: "mail-1", labelIds: [], snippet: "Please approve today", payload: { headers: [] } } }),
+        list: async () => ({ data: { messages: [{ id: "new-low" }, { id: "old-urgent" }], nextPageToken: "next", resultSizeEstimate: 2000 } }),
+        get: async ({ id }) => ({ data: { id, labelIds: [], snippet: "", payload: { headers: [] } } }),
       },
     },
   };
@@ -24,19 +22,17 @@ test("All Emails returns a page before mailbox-wide indexing finishes", async ()
   vm.runInNewContext(compiled, {
     exports, console,
     require(name) {
-      if (name === "next/server") return { NextResponse: nextServer.NextResponse, after: (callback) => scheduled.push(callback) };
+      if (name === "next/server") return { NextResponse: nextServer.NextResponse };
       if (name === "googleapis") return { google: { gmail: () => gmail } };
       if (name === "@/lib/google") return { createGoogleOAuthClient: () => ({ setCredentials() {}, on() {} }) };
       if (name === "@/lib/gmail-session") return { getGmailSession: () => ({ access_token: "fake" }), saveGmailSession() {} };
-      if (name === "@/lib/gmail-message") return { parseGmailMessage: () => ({ id: "mail-1", date: "2026-10-17T00:00:00Z", draft: false }) };
-      if (name === "@/lib/gmail-priority") return { ensurePriorityLabels: async () => ({ urgent: "u", fyi: "f", low: "l" }) };
-      if (name === "@/lib/priority-index") return {
-        getReadyPriorityIndex: () => null,
-        getPriorityIndex: () => { indexStarted = true; return new Promise(() => {}); },
+      if (name === "@/lib/gmail-message") return { parseGmailMessage: (message) => ({ id: message.id, date: message.id === "new-low" ? "2026-10-17T00:00:00Z" : "2026-10-16T00:00:00Z", draft: false }) };
+      if (name === "@/lib/gmail-priority") return {
+        ensurePriorityLabels: async () => ({ urgent: "u", fyi: "f", low: "l" }),
+        getOrAssignPriority: async (_gmail, message) => message.id === "new-low" ? "low" : "urgent",
       };
       if (name === "@/lib/mail-priority") return {
-        classifyPriority: () => "urgent", priorityFromLabels: () => null,
-        comparePriority: () => 0,
+        comparePriority: (a, b) => a.priority.localeCompare(b.priority),
       };
       throw new Error(`Unexpected import: ${name}`);
     },
@@ -45,10 +41,8 @@ test("All Emails returns a page before mailbox-wide indexing finishes", async ()
   const response = await exports.GET(request);
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.messages[0].id, "mail-1");
-  assert.equal(body.messages[0].priority, "urgent");
-  assert.equal(body.sortingPending, true);
+  assert.deepEqual(body.messages.map((message) => message.id), ["new-low", "old-urgent"]);
+  assert.deepEqual(body.messages.map((message) => message.priority), ["low", "urgent"]);
+  assert.equal("sortingPending" in body, false);
   assert.equal(body.nextPageToken, "next");
-  assert.equal(indexStarted, false);
-  assert.equal(scheduled.length, 1);
 });

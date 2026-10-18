@@ -1,11 +1,10 @@
-import { after, type NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { ensurePriorityLabels, getOrAssignPriority } from "@/lib/gmail-priority";
-import { getPriorityIndex, getReadyPriorityIndex, priorityIndexNeedsRefresh } from "@/lib/priority-index";
-import { classifyPriority, comparePriority, priorityFromLabels } from "@/lib/mail-priority";
+import { comparePriority } from "@/lib/mail-priority";
 
 export async function GET(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
@@ -36,50 +35,6 @@ export async function GET(request: NextRequest) {
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
     const isDailyBriefing = Boolean(afterSeconds);
     const labels = await ensurePriorityLabels(gmail);
-
-    if (!isDailyBriefing && mailboxMode === "all") {
-      const requestedPage = Number(request.nextUrl.searchParams.get("page"));
-      const page = Number.isSafeInteger(requestedPage) && requestedPage >= 0 ? requestedPage : 0;
-      const index = getReadyPriorityIndex(sessionId);
-      if (index) {
-        if (priorityIndexNeedsRefresh(sessionId)) {
-          after(async () => {
-            try { await getPriorityIndex(sessionId, gmail); }
-            catch (error) { console.error("Gmail priority indexing failed", error); }
-          });
-        }
-        const selected = index.slice(page * 50, (page + 1) * 50);
-        const messages = await Promise.all(selected.map(async ({ id, priority }) => {
-          const result = await gmail.users.messages.get({ userId: "me", id, format: "full" });
-          return { ...parseGmailMessage(result.data), priority };
-        }));
-        return NextResponse.json({ connected: true, messages, nextPageToken: (page + 1) * 50 < index.length ? String(page + 1) : undefined, resultSizeEstimate: index.length, sortingPending: false });
-      }
-
-      // Serve the requested Gmail page immediately. The complete priority index
-      // is built after this response so large mailboxes cannot hold the UI open.
-      const list = await gmail.users.messages.list({ userId: "me", maxResults: 50, pageToken: requestedPageToken });
-      const messages = await Promise.all((list.data.messages ?? []).flatMap(({ id }) => id ? [id] : []).map(async (id) => {
-        const result = await gmail.users.messages.get({ userId: "me", id, format: "full" });
-        if (result.data.labelIds?.includes("DRAFT")) return null;
-        const priority = priorityFromLabels(result.data.labelIds, labels) ?? classifyPriority(result.data);
-        return { ...parseGmailMessage(result.data), priority };
-      }));
-      after(async () => {
-        try {
-          await getPriorityIndex(sessionId, gmail);
-        } catch (error) {
-          console.error("Gmail priority indexing failed", error);
-        }
-      });
-      return NextResponse.json({
-        connected: true,
-        messages: messages.filter((message) => message !== null).sort(comparePriority),
-        nextPageToken: list.data.nextPageToken ?? undefined,
-        resultSizeEstimate: list.data.resultSizeEstimate ?? undefined,
-        sortingPending: true,
-      });
-    }
 
     const messageIds: string[] = [];
     let pageToken = requestedPageToken;
@@ -131,7 +86,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       connected: true,
-      messages: filteredMessages.sort(comparePriority),
+      // Gmail already returns ordinary mailbox pages in its native incoming-mail
+      // order. Only the Daily Briefing groups messages by MailFlow priority.
+      messages: isDailyBriefing ? filteredMessages.sort(comparePriority) : filteredMessages,
       nextPageToken: !isDailyBriefing ? nextPageToken : undefined,
       resultSizeEstimate: !isDailyBriefing ? resultSizeEstimate : undefined,
     });

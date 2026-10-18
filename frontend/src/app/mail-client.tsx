@@ -5,7 +5,7 @@ import { GoogleLoginButton } from "./google-login-button";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
 
 type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean; draft: boolean; priority: Priority };
-type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number; sortingPending?: boolean };
+type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
 type View = "briefing" | "all" | "starred" | "drafts" | "trash";
@@ -151,7 +151,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [allPageTokens, setAllPageTokens] = useState([""]);
   const [allPageIndex, setAllPageIndex] = useState(0);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
-  const [sortingPending, setSortingPending] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
 
@@ -178,8 +177,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       const nextMessages = data.messages ?? [];
       setConnected(true);
       setMessages(nextMessages);
-      if (targetView === "all") setSortingPending(Boolean(data.sortingPending));
-      else setSortingPending(false);
       if (showLoading) {
         setSelectedIds(new Set());
       } else {
@@ -263,7 +260,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const fullDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
   const changeView = (next: View) => {
     setView(next);
-    setSortingPending(false);
     setSelectedMail(null);
     setSelectedIds(new Set());
     if (next !== "briefing") {
@@ -338,7 +334,10 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     if (!selectedMail || selectedMail.priority === priority) return;
     const previous = selectedMail;
     setSelectedMail({ ...previous, priority });
-    setMessages((current) => current.map((message) => message.id === previous.id ? { ...message, priority } : message).sort(comparePriority));
+    setMessages((current) => {
+      const updated = current.map((message) => message.id === previous.id ? { ...message, priority } : message);
+      return view === "all" ? updated : updated.sort(comparePriority);
+    });
     setError(null);
     try {
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(previous.id)}`, {
@@ -347,7 +346,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         body: JSON.stringify({ action: "priority", priority }),
       });
       if (!response.ok) throw new Error("Priority could not be saved.");
-      if (view === "all") void loadMessages("all", false);
     } catch (changeError) {
       setSelectedMail((current) => current?.id === previous.id ? { ...current, priority: previous.priority } : current);
       setMessages((current) => current.map((message) => message.id === previous.id ? { ...message, priority: previous.priority } : message));
@@ -467,7 +465,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           {view === "briefing" && <TodayCard />}
           <section>
             <div className="mb-3">{view === "briefing" && <h2 className="text-base font-extrabold">Today&apos;s emails</h2>}<p className="mt-0.5 text-xs text-[#9a968c]">{loading ? "Syncing your inbox…" : view === "briefing" ? `${messages.length} message${messages.length === 1 ? "" : "s"} · Updates automatically` : `Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`}</p></div>
-            {view === "all" && sortingPending && <p className="mb-3 rounded-xl bg-[#eeecfb] px-4 py-3 text-sm text-[#5742d5]">Showing recent mail while priorities are being sorted across your mailbox.</p>}
             {view === "briefing" && <div className="mb-4 flex flex-wrap gap-2" aria-label="Today's priority counts">
               {(["urgent", "fyi", "low"] as const).map((priority) => <span key={priority} className={`rounded-full px-3 py-1.5 text-xs font-bold ${priorityDisplay[priority].className}`}>{messages.filter((message) => message.priority === priority).length} {priorityDisplay[priority].label}</span>)}
             </div>}
@@ -484,7 +481,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
                 const rowTone = !message.unread ? "bg-[#f1f1ef] hover:bg-[#eaeae7]" : "bg-white hover:bg-[#faf9f6]";
                 const startsGroup = index === 0 || messages[index - 1].priority !== message.priority;
                 return <article key={message.id} className={index ? "border-t border-[#deddd9]" : ""}>
-                  {startsGroup && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
+                  {startsGroup && view !== "all" && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
                     <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
