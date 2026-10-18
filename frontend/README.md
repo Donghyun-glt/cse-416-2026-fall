@@ -35,6 +35,29 @@ requires users to log in again. Before hosting across multiple processes or
 serverless instances, replace that store with a shared persistent store and
 encrypt tokens at rest.
 
+## Local classification database
+
+The localhost application creates `data/mailflow.db` with Node's built-in
+SQLite driver. Gmail remains the source of truth for messages and labels. The
+database stores only MailFlow-owned classification metadata:
+
+- Gmail account email and optional display name
+- Gmail message ID, current priority, and last-seen time
+- Whether a priority came from automatic rules, a manual override, or an
+  existing Gmail label
+- The rule explanation and boolean signals used by automatic classification
+- An append-only history of priority changes
+
+MailFlow does not copy message subjects, bodies, attachments, passwords, or
+OAuth tokens into this database. The database and its journal files are ignored
+by Git. Set `MAILFLOW_DB_PATH` to override the default location.
+
+After loading mail in the app, inspect classification totals and recent changes:
+
+```bash
+npm run db:inspect
+```
+
 ## Development
 
 Run these commands from `frontend/`:

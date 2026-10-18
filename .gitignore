@@ -11,3 +11,7 @@ out/
 .DS_Store
 *.log
 
+# Local MailFlow database
+frontend/data/*.db
+frontend/data/*.db-*
+

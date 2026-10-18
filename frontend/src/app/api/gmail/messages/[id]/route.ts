@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
 import { ensurePriorityLabels, setPriority } from "@/lib/gmail-priority";
+import { upsertUser } from "@/lib/mailflow-db";
 import { isPriority } from "@/lib/mail-priority";
 
 async function getAuthorizedGmail(request: NextRequest) {
@@ -35,7 +36,9 @@ export async function PATCH(
     if (body.action === "priority") {
       if (!isPriority(body.priority)) return NextResponse.json({ error: "invalid_priority" }, { status: 400 });
       const labels = await ensurePriorityLabels(gmail);
-      await setPriority(gmail, id, body.priority, labels);
+      const gmailProfile = await gmail.users.getProfile({ userId: "me" });
+      const userId = upsertUser(gmailProfile.data.emailAddress ?? "");
+      await setPriority(gmail, id, body.priority, labels, userId);
       return NextResponse.json({ priority: body.priority });
     }
     if (body.action === "restore") {

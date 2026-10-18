@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient, GMAIL_MODIFY_SCOPE } from "@/lib/google";
 import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
+import { upsertUser } from "@/lib/mailflow-db";
 
 function fallbackName(email: string) {
   return email.split("@")[0] || "Gmail user";
@@ -57,9 +58,12 @@ export async function GET(request: NextRequest) {
       requiresProfileAuthorization = status === 401 || status === 403;
     }
 
+    const displayName = name || fallbackName(email);
+    upsertUser(email, displayName);
+
     return NextResponse.json({
       connected: true,
-      name: name || fallbackName(email),
+      name: displayName,
       email,
       requiresProfileAuthorization,
       requiresMailboxAuthorization:

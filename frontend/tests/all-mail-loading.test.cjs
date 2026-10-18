@@ -10,6 +10,7 @@ const nextServer = require("next/server");
 test("All Emails preserves Gmail order while attaching priority labels", async () => {
   const gmail = {
     users: {
+      getProfile: async () => ({ data: { emailAddress: "demo@example.com" } }),
       messages: {
         list: async () => ({ data: { messages: [{ id: "new-low" }, { id: "old-urgent" }], nextPageToken: "next", resultSizeEstimate: 2000 } }),
         get: async ({ id }) => ({ data: { id, labelIds: [], snippet: "", payload: { headers: [] } } }),
@@ -31,6 +32,7 @@ test("All Emails preserves Gmail order while attaching priority labels", async (
         ensurePriorityLabels: async () => ({ urgent: "u", fyi: "f", low: "l" }),
         getOrAssignPriority: async (_gmail, message) => message.id === "new-low" ? "low" : "urgent",
       };
+      if (name === "@/lib/mailflow-db") return { upsertUser: () => 1 };
       if (name === "@/lib/mail-priority") return {
         comparePriority: (a, b) => a.priority.localeCompare(b.priority),
       };
