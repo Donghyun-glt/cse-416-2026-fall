@@ -86,6 +86,14 @@ npm run dev
 
 Open http://localhost:3000. Google sign-in also requires the OAuth settings described in [frontend/README.md](frontend/README.md).
 
+### Data Design + Web Views assignment
+
+Open [http://localhost:3000/demo](http://localhost:3000/demo) for the interactive, sample-data UI draft. It covers the daily briefing, email list and detail, AI summary and editable reply, send confirmation, event preview, calendar, and manual compose. This preview does not call Gmail or Google Calendar, and its confirmation buttons do not perform external actions.
+
+The demo keeps its four view controls in a vertical navigation rail at the right side of the screen. The rest of the app remains independent of this preview.
+
+The relational design is in [Documents/MailFlowAI-DataDesign.pdf](Documents/MailFlowAI-DataDesign.pdf). The contribution section is based on the shared repository's commit history; the team should review it before submission.
+
 ## What Makes It Different?
 
 | Feature | What it provides |
