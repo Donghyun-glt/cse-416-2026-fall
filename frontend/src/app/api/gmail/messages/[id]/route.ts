@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
+import { getGmailSession } from "@/lib/gmail-session";
 import { ensurePriorityLabels, setPriority } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
 import { isPriority } from "@/lib/mail-priority";
@@ -13,9 +13,6 @@ async function getAuthorizedGmail(request: NextRequest) {
 
   const oauth2Client = createGoogleOAuthClient();
   oauth2Client.setCredentials(tokens);
-  oauth2Client.on("tokens", (newTokens) => {
-    saveGmailSession(sessionId, { ...tokens, ...newTokens });
-  });
   return google.gmail({ version: "v1", auth: oauth2Client });
 }
 

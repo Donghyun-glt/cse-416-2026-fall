@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Priority, PrioritySignals } from "./mail-priority";
@@ -20,9 +21,14 @@ function getDatabase() {
   if (databaseState.database) return databaseState.database;
 
   const configuredPath = process.env.MAILFLOW_DB_PATH?.trim();
+  // Vercel's project directory is read-only, and only the OS temp directory is
+  // writable there. It is per-instance and temporary, but priorities also live
+  // in Gmail labels, so the app keeps working until a hosted database replaces it.
   const databasePath = configuredPath
     ? path.resolve(configuredPath)
-    : path.join(process.cwd(), "data", "mailflow.db");
+    : process.env.VERCEL
+      ? path.join(tmpdir(), "mailflow.db")
+      : path.join(process.cwd(), "data", "mailflow.db");
 
   mkdirSync(path.dirname(databasePath), { recursive: true });
   const database = new DatabaseSync(databasePath);

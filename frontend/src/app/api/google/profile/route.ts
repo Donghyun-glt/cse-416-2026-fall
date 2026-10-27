@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient, GMAIL_MODIFY_SCOPE } from "@/lib/google";
-import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
+import { getGmailSession } from "@/lib/gmail-session";
 import { upsertUser } from "@/lib/mailflow-db";
 
 function fallbackName(email: string) {
@@ -26,9 +26,6 @@ export async function GET(request: NextRequest) {
   try {
     const oauth2Client = createGoogleOAuthClient();
     oauth2Client.setCredentials(tokens);
-    oauth2Client.on("tokens", (newTokens) => {
-      saveGmailSession(sessionId, { ...tokens, ...newTokens });
-    });
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
     const gmailProfile = await gmail.users.getProfile({ userId: "me" });

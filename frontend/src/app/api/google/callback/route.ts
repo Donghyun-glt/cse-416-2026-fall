@@ -1,7 +1,6 @@
-import { randomBytes } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { saveGmailSession } from "@/lib/gmail-session";
+import { sealGmailSession } from "@/lib/gmail-session";
 
 function redirectAfterLogin(request: NextRequest, error?: string) {
   const popup = request.cookies.get("gmail_oauth_popup")?.value === "1";
@@ -28,11 +27,10 @@ export async function GET(request: NextRequest) {
   try {
     const oauth2Client = createGoogleOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
-    const sessionId = randomBytes(32).toString("hex");
-    saveGmailSession(sessionId, tokens);
+    const session = sealGmailSession(tokens);
 
     const response = redirectAfterLogin(request);
-    response.cookies.set("gmail_session", sessionId, {
+    response.cookies.set("gmail_session", session, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",

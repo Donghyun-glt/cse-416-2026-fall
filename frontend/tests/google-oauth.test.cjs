@@ -40,7 +40,11 @@ function handler(route, configured = true) {
         GOOGLE_PROFILE_SCOPES: ["openid", "email", "profile"],
       };
       if (name === "@/lib/gmail-session") return {
-        saveGmailSession: (id, tokens) => sessions.set(id, tokens),
+        sealGmailSession: (tokens) => {
+          const sealed = `sealed-${sessions.size}`;
+          sessions.set(sealed, tokens);
+          return sealed;
+        },
       };
       return require(name);
     },
@@ -104,4 +108,32 @@ test("denied consent returns an error and clears the OAuth attempt", async () =>
   assert.equal(response.headers.get("location"), "https://mailflow.test/auth/google/complete?error=access_denied");
   assert.equal(response.cookies.get("gmail_oauth_state").value, "");
   assert.equal(route.sessions.size, 0);
+});
+
+function sessionModule(secret) {
+  const source = readFileSync(resolve(__dirname, "../src/lib/gmail-session.ts"), "utf8");
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const exports = {};
+  vm.runInNewContext(compiled, { exports, Buffer, JSON, process: { env: { SESSION_SECRET: secret } }, require });
+  return exports;
+}
+
+test("session cookie round-trips tokens without exposing them", () => {
+  const { sealGmailSession, getGmailSession } = sessionModule("test-secret");
+  const sealed = sealGmailSession({ access_token: "fake-access", refresh_token: "fake-refresh", id_token: "large" });
+  assert.ok(!sealed.includes("fake"));
+  const tokens = getGmailSession(sealed);
+  assert.equal(tokens.refresh_token, "fake-refresh");
+  assert.equal(tokens.id_token, undefined);
+});
+
+test("tampered or foreign session cookies are rejected", () => {
+  const { sealGmailSession, getGmailSession } = sessionModule("test-secret");
+  const sealed = sealGmailSession({ refresh_token: "fake-refresh" });
+  const tampered = `${sealed.slice(0, -2)}${sealed.endsWith("A") ? "B" : "A"}A`;
+  assert.equal(getGmailSession(tampered), undefined);
+  assert.equal(getGmailSession("not-a-session"), undefined);
+  assert.equal(sessionModule("other-secret").getGmailSession(sealed), undefined);
 });

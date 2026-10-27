@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { getGmailSession, saveGmailSession } from "@/lib/gmail-session";
+import { getGmailSession } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { ensurePriorityLabels, getOrAssignPriority } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
@@ -29,9 +29,6 @@ export async function GET(request: NextRequest) {
 
     const oauth2Client = createGoogleOAuthClient();
     oauth2Client.setCredentials(tokens);
-    oauth2Client.on("tokens", (newTokens) => {
-      saveGmailSession(sessionId, { ...tokens, ...newTokens });
-    });
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
     const isDailyBriefing = Boolean(afterSeconds);
