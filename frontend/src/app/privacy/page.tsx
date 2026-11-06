@@ -25,9 +25,9 @@ export default function PrivacyPolicy() {
           <li>
             <strong>Gmail read and modify</strong> (<code>gmail.modify</code>): MailFlow reads your messages
             (sender, recipients, subject, date, body and labels) to display them and to classify their priority.
-            MailFlow also changes your mailbox only when the app needs to or when you ask it to: marking a message as
-            read, starring or unstarring it, moving it to or restoring it from Trash, and creating and applying the
-            labels <code>MailFlow/Urgent</code>, <code>MailFlow/FYI</code> and <code>MailFlow/Low Priority</code>.
+            MailFlow changes your mailbox only when you ask it to: marking a message as read, starring or unstarring
+            it, and moving it to or restoring it from Trash. MailFlow priority categories are stored in MailFlow&apos;s
+            database and are not applied to your Gmail messages as labels.
           </li>
         </ul>
         <p>MailFlow never sends email on your behalf and never permanently deletes your messages.</p>
@@ -52,7 +52,7 @@ export default function PrivacyPolicy() {
             automatic rules assigned it, a short fixed explanation (for example, &quot;A direct request includes
             time-sensitive language&quot;), and a history of priority changes.
           </li>
-          <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, used only to make Gmail requests for you, together with a session cookie in your browser that lasts up to 7 days.</li>
+          <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used only to make Gmail requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>
           We do not store message subjects, bodies or attachments. Messages are fetched from Gmail when you open the
@@ -92,7 +92,6 @@ export default function PrivacyPolicy() {
             To delete your account record and priority records, email us at{" "}
             <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>. We will delete them within 30 days.
           </li>
-          <li>The <code>MailFlow/*</code> labels stay in your Gmail until you delete them in Gmail.</li>
         </ul>
       </section>
 

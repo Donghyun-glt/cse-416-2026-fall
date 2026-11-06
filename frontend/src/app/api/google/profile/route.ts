@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient, GMAIL_MODIFY_SCOPE } from "@/lib/google";
-import { getGmailSession } from "@/lib/gmail-session";
+import { attachGmailSessionToUser, getGmailSession } from "@/lib/gmail-session";
 import { upsertUser } from "@/lib/mailflow-db";
 
 function fallbackName(email: string) {
@@ -17,7 +17,7 @@ function getHttpStatus(error: unknown) {
 
 export async function GET(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
-  const tokens = sessionId ? getGmailSession(sessionId) : undefined;
+  const tokens = sessionId ? await getGmailSession(sessionId) : undefined;
 
   if (!sessionId || !tokens) {
     return NextResponse.json({ connected: false }, { status: 401 });
@@ -56,7 +56,8 @@ export async function GET(request: NextRequest) {
     }
 
     const displayName = name || fallbackName(email);
-    upsertUser(email, displayName);
+    const userId = await upsertUser(email, displayName);
+    await attachGmailSessionToUser(sessionId, userId);
 
     return NextResponse.json({
       connected: true,

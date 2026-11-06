@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const ts = require("typescript");
 const nextServer = require("next/server");
 
-test("All Emails preserves Gmail order while attaching priority labels", async () => {
+test("All Emails preserves Gmail order while attaching database priorities", async () => {
   const gmail = {
     users: {
       getProfile: async () => ({ data: { emailAddress: "demo@example.com" } }),
@@ -26,13 +26,15 @@ test("All Emails preserves Gmail order while attaching priority labels", async (
       if (name === "next/server") return { NextResponse: nextServer.NextResponse };
       if (name === "googleapis") return { google: { gmail: () => gmail } };
       if (name === "@/lib/google") return { createGoogleOAuthClient: () => ({ setCredentials() {}, on() {} }) };
-      if (name === "@/lib/gmail-session") return { getGmailSession: () => ({ access_token: "fake" }), saveGmailSession() {} };
+      if (name === "@/lib/gmail-session") return {
+        getGmailSession: async () => ({ access_token: "fake" }),
+        attachGmailSessionToUser: async () => {},
+      };
       if (name === "@/lib/gmail-message") return { parseGmailMessage: (message) => ({ id: message.id, date: message.id === "new-low" ? "2026-10-17T00:00:00Z" : "2026-10-16T00:00:00Z", draft: false }) };
       if (name === "@/lib/gmail-priority") return {
-        ensurePriorityLabels: async () => ({ urgent: "u", fyi: "f", low: "l" }),
-        getOrAssignPriority: async (_gmail, message) => message.id === "new-low" ? "low" : "urgent",
+        getOrAssignPriority: async (message) => message.id === "new-low" ? "low" : "urgent",
       };
-      if (name === "@/lib/mailflow-db") return { upsertUser: () => 1 };
+      if (name === "@/lib/mailflow-db") return { upsertUser: async () => 1 };
       if (name === "@/lib/mail-priority") return {
         comparePriority: (a, b) => a.priority.localeCompare(b.priority),
       };

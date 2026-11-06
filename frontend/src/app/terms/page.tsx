@@ -21,8 +21,8 @@ export default function TermsOfService() {
         <h2>The service</h2>
         <p>
           MailFlow shows the messages in your Gmail inbox and sorts them by priority. It can also mark messages as
-          read, star them, move them to Trash, restore them from Trash, and apply MailFlow priority labels. MailFlow
-          takes these actions only when you request them in the app or when it applies priority labels.
+          read, star them, move them to Trash, and restore them from Trash. MailFlow stores its priority categories
+          separately and changes your Gmail mailbox only when you request an action in the app.
         </p>
       </section>
 
@@ -47,7 +47,7 @@ export default function TermsOfService() {
         <h2>Student project disclaimer</h2>
         <p>
           MailFlow is an academic project. It is provided &quot;as is&quot; without warranties of any kind, and it may
-          change, break or stop working at any time. Automatic priority labels may be wrong, so do not rely on them
+          change, break or stop working at any time. Automatic priority categories may be wrong, so do not rely on them
           for important decisions. To the extent permitted by law, we are not liable for lost or missed email or any
           other damage that results from using the service.
         </p>

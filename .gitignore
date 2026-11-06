@@ -11,7 +11,10 @@ out/
 .DS_Store
 *.log
 
-# Local MailFlow database
+# Legacy local SQLite files (no longer used by the application)
 frontend/data/*.db
 frontend/data/*.db-*
 
+
+.vercel
+.env*

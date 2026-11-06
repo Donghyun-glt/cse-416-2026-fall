@@ -16,7 +16,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
   const { error } = await searchParams;
   const sessionId = (await cookies()).get("gmail_session")?.value;
-  const connected = Boolean(sessionId && getGmailSession(sessionId));
+  const connected = Boolean(sessionId && await getGmailSession(sessionId));
 
   const googleConfigured = Boolean(
     process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI,

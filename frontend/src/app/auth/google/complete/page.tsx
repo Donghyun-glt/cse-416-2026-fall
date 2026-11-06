@@ -7,6 +7,6 @@ export default async function GoogleLoginComplete({ searchParams }: {
 }) {
   const { error } = await searchParams;
   const sessionId = (await cookies()).get("gmail_session")?.value;
-  const connected = Boolean(sessionId && getGmailSession(sessionId));
+  const connected = Boolean(sessionId && await getGmailSession(sessionId));
   return <GoogleLoginCompletion error={error || (connected ? undefined : "invalid_oauth_state")} />;
 }

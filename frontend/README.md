@@ -30,27 +30,33 @@ verification and security assessment. See
 [Google's scope requirements](https://developers.google.com/workspace/gmail/api/auth/scopes)
 and [audience settings](https://support.google.com/cloud/answer/15549945).
 
-Sessions currently use the existing in-memory token store. A process restart
-requires users to log in again. Before hosting across multiple processes or
-serverless instances, replace that store with a shared persistent store and
-encrypt tokens at rest.
+Sessions use opaque browser cookies backed by PostgreSQL. Google OAuth tokens
+are encrypted with `SESSION_SECRET` before storage, so sessions survive process
+restarts and work across serverless instances.
 
-## Local classification database
+## PostgreSQL database
 
-The localhost application creates `data/mailflow.db` with Node's built-in
-SQLite driver. Gmail remains the source of truth for messages and labels. The
-database stores only MailFlow-owned classification metadata:
+MailFlow uses a managed PostgreSQL database in local and hosted environments.
+Gmail remains the source of truth for message content and mailbox state, while
+PostgreSQL stores MailFlow-owned data:
 
 - Gmail account email and optional display name
 - Gmail message ID, current priority, and last-seen time
-- Whether a priority came from automatic rules, a manual override, or an
-  existing Gmail label
+- Whether a priority came from automatic rules or a manual override
 - The rule explanation and boolean signals used by automatic classification
 - An append-only history of priority changes
+- Encrypted Google OAuth session tokens and their expiration times
 
 MailFlow does not copy message subjects, bodies, attachments, passwords, or
-OAuth tokens into this database. The database and its journal files are ignored
-by Git. Set `MAILFLOW_DB_PATH` to override the default location.
+Gmail labels into PostgreSQL. Priority categories are not written back to Gmail.
+
+Set `DATABASE_URL` to a PostgreSQL connection string that requires TLS and set a
+long random `SESSION_SECRET`. After provisioning a new database, run migrations
+from `frontend/`:
+
+```bash
+npm run db:migrate
+```
 
 After loading mail in the app, inspect classification totals and recent changes:
 

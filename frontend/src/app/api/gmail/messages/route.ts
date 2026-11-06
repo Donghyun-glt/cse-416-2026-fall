@@ -1,15 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { getGmailSession } from "@/lib/gmail-session";
+import { attachGmailSessionToUser, getGmailSession } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
-import { ensurePriorityLabels, getOrAssignPriority } from "@/lib/gmail-priority";
+import { getOrAssignPriority } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
 import { comparePriority } from "@/lib/mail-priority";
 
 export async function GET(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
-  const tokens = sessionId ? getGmailSession(sessionId) : undefined;
+  const tokens = sessionId ? await getGmailSession(sessionId) : undefined;
 
   if (!sessionId || !tokens) {
     return NextResponse.json({ connected: false, messages: [] }, { status: 401 });
@@ -32,9 +32,9 @@ export async function GET(request: NextRequest) {
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
     const isDailyBriefing = Boolean(afterSeconds);
-    const labels = await ensurePriorityLabels(gmail);
     const gmailProfile = await gmail.users.getProfile({ userId: "me" });
-    const userId = upsertUser(gmailProfile.data.emailAddress ?? "");
+    const userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+    await attachGmailSessionToUser(sessionId, userId);
 
     const messageIds: string[] = [];
     let pageToken = requestedPageToken;
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
           id,
           format: "full",
         });
-        const priority = result.data.labelIds?.includes("DRAFT") ? "fyi" : await getOrAssignPriority(gmail, result.data, labels, userId);
+        const priority = result.data.labelIds?.includes("DRAFT") ? "fyi" : await getOrAssignPriority(result.data, userId);
         const message = { ...parseGmailMessage(result.data), priority };
         const receivedAt = Number(result.data.internalDate ?? 0);
         return !afterSeconds || receivedAt >= afterSeconds * 1000 ? message : null;

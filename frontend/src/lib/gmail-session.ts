@@ -1,23 +1,22 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Credentials } from "google-auth-library";
+import { query } from "./postgres";
 
-// Serverless hosts such as Vercel do not share memory between requests, so the
-// session lives in the browser as an encrypted, HttpOnly cookie instead of in a
-// server-side map. Only the server holds the key, so the browser can neither
-// read nor forge the Google tokens inside.
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function getKey() {
-  // SESSION_SECRET is preferred; the OAuth client secret is already a
-  // server-only value, so it is a safe fallback for local development.
-  const secret = process.env.SESSION_SECRET || process.env.GOOGLE_CLIENT_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET or GOOGLE_CLIENT_SECRET must be configured.");
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET must be configured to encrypt OAuth tokens.");
   return createHash("sha256").update(secret).digest();
 }
 
-export function sealGmailSession(tokens: Credentials) {
-  // The ID token is not needed after login and would make the cookie too large.
+function sessionHash(sessionId: string) {
+  return createHash("sha256").update(sessionId).digest("hex");
+}
+
+export function sealGmailTokens(tokens: Credentials) {
   const { access_token, refresh_token, expiry_date, scope, token_type } = tokens;
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv("aes-256-gcm", getKey(), iv);
@@ -28,9 +27,10 @@ export function sealGmailSession(tokens: Credentials) {
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64url");
 }
 
-export function getGmailSession(sealed: string): Credentials | undefined {
+export function openGmailTokens(sealed: string): Credentials | undefined {
   try {
     const data = Buffer.from(sealed, "base64url");
+    if (data.length <= IV_LENGTH + TAG_LENGTH) return undefined;
     const decipher = createDecipheriv("aes-256-gcm", getKey(), data.subarray(0, IV_LENGTH));
     decipher.setAuthTag(data.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH));
     const decrypted = Buffer.concat([
@@ -39,7 +39,35 @@ export function getGmailSession(sealed: string): Credentials | undefined {
     ]);
     return JSON.parse(decrypted.toString("utf8")) as Credentials;
   } catch {
-    // Tampered, truncated, or encrypted with an old key: treat as logged out.
     return undefined;
   }
+}
+
+export async function createGmailSession(tokens: Credentials) {
+  const sessionId = randomBytes(32).toString("base64url");
+  await query("DELETE FROM oauth_sessions WHERE expires_at <= NOW()");
+  await query(`
+    INSERT INTO oauth_sessions (session_hash, token_ciphertext, expires_at)
+    VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 second'))
+  `, [sessionHash(sessionId), sealGmailTokens(tokens), SESSION_TTL_SECONDS]);
+  return sessionId;
+}
+
+export async function getGmailSession(sessionId: string): Promise<Credentials | undefined> {
+  const result = await query<{ token_ciphertext: string }>(`
+    UPDATE oauth_sessions
+    SET last_seen_at = NOW()
+    WHERE session_hash = $1 AND expires_at > NOW()
+    RETURNING token_ciphertext
+  `, [sessionHash(sessionId)]);
+  const sealed = result.rows[0]?.token_ciphertext;
+  return sealed ? openGmailTokens(sealed) : undefined;
+}
+
+export async function attachGmailSessionToUser(sessionId: string, userId: number) {
+  await query(`
+    UPDATE oauth_sessions
+    SET user_id = $2, last_seen_at = NOW()
+    WHERE session_hash = $1 AND expires_at > NOW()
+  `, [sessionHash(sessionId), userId]);
 }

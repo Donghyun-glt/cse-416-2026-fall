@@ -16,18 +16,8 @@ export type PriorityDecision = {
   signals: PrioritySignals;
 };
 
-export const PRIORITY_LABEL_NAMES: Record<Priority, string> = {
-  urgent: "MailFlow/Urgent",
-  fyi: "MailFlow/FYI",
-  low: "MailFlow/Low Priority",
-};
-
 export function isPriority(value: unknown): value is Priority {
   return PRIORITIES.includes(value as Priority);
-}
-
-export function priorityFromLabels(labelIds: string[] | null | undefined, labels: Record<Priority, string>): Priority | null {
-  return PRIORITIES.find((priority) => labelIds?.includes(labels[priority])) ?? null;
 }
 
 export function classifyPriorityWithReason(message: Pick<gmail_v1.Schema$Message, "payload" | "snippet">): PriorityDecision {

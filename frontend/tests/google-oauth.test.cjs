@@ -40,7 +40,7 @@ function handler(route, configured = true) {
         GOOGLE_PROFILE_SCOPES: ["openid", "email", "profile"],
       };
       if (name === "@/lib/gmail-session") return {
-        sealGmailSession: (tokens) => {
+        createGmailSession: async (tokens) => {
           const sealed = `sealed-${sessions.size}`;
           sessions.set(sealed, tokens);
           return sealed;
@@ -116,24 +116,30 @@ function sessionModule(secret) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, Buffer, JSON, process: { env: { SESSION_SECRET: secret } }, require });
+  vm.runInNewContext(compiled, {
+    exports, Buffer, JSON, process: { env: { SESSION_SECRET: secret } },
+    require(name) {
+      if (name === "./postgres") return { query: async () => ({ rows: [] }) };
+      return require(name);
+    },
+  });
   return exports;
 }
 
-test("session cookie round-trips tokens without exposing them", () => {
-  const { sealGmailSession, getGmailSession } = sessionModule("test-secret");
-  const sealed = sealGmailSession({ access_token: "fake-access", refresh_token: "fake-refresh", id_token: "large" });
+test("OAuth token encryption round-trips without exposing plaintext", () => {
+  const { sealGmailTokens, openGmailTokens } = sessionModule("test-secret");
+  const sealed = sealGmailTokens({ access_token: "fake-access", refresh_token: "fake-refresh", id_token: "large" });
   assert.ok(!sealed.includes("fake"));
-  const tokens = getGmailSession(sealed);
+  const tokens = openGmailTokens(sealed);
   assert.equal(tokens.refresh_token, "fake-refresh");
   assert.equal(tokens.id_token, undefined);
 });
 
 test("tampered or foreign session cookies are rejected", () => {
-  const { sealGmailSession, getGmailSession } = sessionModule("test-secret");
-  const sealed = sealGmailSession({ refresh_token: "fake-refresh" });
+  const { sealGmailTokens, openGmailTokens } = sessionModule("test-secret");
+  const sealed = sealGmailTokens({ refresh_token: "fake-refresh" });
   const tampered = `${sealed.slice(0, -2)}${sealed.endsWith("A") ? "B" : "A"}A`;
-  assert.equal(getGmailSession(tampered), undefined);
-  assert.equal(getGmailSession("not-a-session"), undefined);
-  assert.equal(sessionModule("other-secret").getGmailSession(sealed), undefined);
+  assert.equal(openGmailTokens(tampered), undefined);
+  assert.equal(openGmailTokens("not-a-session"), undefined);
+  assert.equal(sessionModule("other-secret").openGmailTokens(sealed), undefined);
 });

@@ -1,14 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { getGmailSession } from "@/lib/gmail-session";
-import { ensurePriorityLabels, setPriority } from "@/lib/gmail-priority";
+import { attachGmailSessionToUser, getGmailSession } from "@/lib/gmail-session";
+import { setPriority } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
 import { isPriority } from "@/lib/mail-priority";
 
 async function getAuthorizedGmail(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
-  const tokens = sessionId ? getGmailSession(sessionId) : undefined;
+  const tokens = sessionId ? await getGmailSession(sessionId) : undefined;
   if (!sessionId || !tokens) return null;
 
   const oauth2Client = createGoogleOAuthClient();
@@ -32,10 +32,11 @@ export async function PATCH(
     };
     if (body.action === "priority") {
       if (!isPriority(body.priority)) return NextResponse.json({ error: "invalid_priority" }, { status: 400 });
-      const labels = await ensurePriorityLabels(gmail);
       const gmailProfile = await gmail.users.getProfile({ userId: "me" });
-      const userId = upsertUser(gmailProfile.data.emailAddress ?? "");
-      await setPriority(gmail, id, body.priority, labels, userId);
+      const userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+      const sessionId = request.cookies.get("gmail_session")?.value;
+      if (sessionId) await attachGmailSessionToUser(sessionId, userId);
+      await setPriority(id, body.priority, userId);
       return NextResponse.json({ priority: body.priority });
     }
     if (body.action === "restore") {

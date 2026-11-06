@@ -1,32 +1,28 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import process from "node:process";
+import pg from "pg";
 
-const databasePath = process.env.MAILFLOW_DB_PATH
-  ? path.resolve(process.env.MAILFLOW_DB_PATH)
-  : path.join(process.cwd(), "data", "mailflow.db");
-
-if (!existsSync(databasePath)) {
-  console.log(`No MailFlow database exists at ${databasePath}. Load Gmail in the app first.`);
-  process.exit(0);
+const connectionString = process.env.DATABASE_URL?.trim();
+if (!connectionString) {
+  console.error("DATABASE_URL must be configured before inspecting the database.");
+  process.exit(1);
 }
 
-const database = new DatabaseSync(databasePath, { readOnly: true });
+const pool = new pg.Pool({ connectionString, max: 1 });
 try {
-  const summary = database.prepare(`
+  const summary = await pool.query(`
     SELECT
       u.email,
-      COUNT(mp.gmail_message_id) AS labeled_messages,
-      SUM(CASE WHEN mp.priority = 'urgent' THEN 1 ELSE 0 END) AS urgent,
-      SUM(CASE WHEN mp.priority = 'fyi' THEN 1 ELSE 0 END) AS fyi,
-      SUM(CASE WHEN mp.priority = 'low' THEN 1 ELSE 0 END) AS low
+      COUNT(mp.gmail_message_id)::INTEGER AS classified_messages,
+      COUNT(*) FILTER (WHERE mp.priority = 'urgent')::INTEGER AS urgent,
+      COUNT(*) FILTER (WHERE mp.priority = 'fyi')::INTEGER AS fyi,
+      COUNT(*) FILTER (WHERE mp.priority = 'low')::INTEGER AS low
     FROM users u
     LEFT JOIN message_priorities mp ON mp.user_id = u.id
     GROUP BY u.id, u.email
     ORDER BY u.email
-  `).all();
+  `);
 
-  const recentHistory = database.prepare(`
+  const recentHistory = await pool.query(`
     SELECT
       u.email,
       pe.gmail_message_id,
@@ -39,13 +35,12 @@ try {
     JOIN users u ON u.id = pe.user_id
     ORDER BY pe.created_at DESC
     LIMIT 25
-  `).all();
+  `);
 
-  console.log(`MailFlow database: ${databasePath}`);
-  console.log("\nCurrent classification totals");
-  console.table(summary);
-  console.log("\nMost recent priority changes");
-  console.table(recentHistory);
+  console.log("Current classification totals");
+  console.table(summary.rows);
+  console.log("Most recent priority changes");
+  console.table(recentHistory.rows);
 } finally {
-  database.close();
+  await pool.end();
 }
