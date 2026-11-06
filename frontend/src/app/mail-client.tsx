@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
+import type { GmailAttachment } from "@/lib/gmail-message";
 
-type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean; draft: boolean; priority: Priority };
+type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean; draft: boolean; priority: Priority; attachments: GmailAttachment[] };
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
@@ -21,7 +22,7 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${display.className}`}>{display.label}</span>;
 }
 
-function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "calendar" | "trash" | "back" | "star" | "draft"; className?: string }) {
+function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "calendar" | "trash" | "back" | "star" | "draft" | "reply" | "forward" | "paperclip" | "download"; className?: string }) {
   const paths = {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" /></>,
@@ -31,8 +32,19 @@ function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" 
     back: <><path d="m15 18-6-6 6-6" /><path d="M9 12h11" /></>,
     star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" />,
     draft: <><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5" /></>,
+    reply: <><path d="m9 17-5-5 5-5" /><path d="M4 12h9a7 7 0 0 1 7 7" /></>,
+    forward: <><path d="m15 17 5-5-5-5" /><path d="M20 12h-9a7 7 0 0 0-7 7" /></>,
+    paperclip: <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.7 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9" />,
+    download: <><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></>,
   };
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
+}
+
+function formatBytes(value: number) {
+  if (!value) return "Unknown size";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatSender(from: string) {
@@ -104,17 +116,56 @@ function TodayCard() {
   );
 }
 
-function MailDetail({ message, deleting, error, onBack, onDelete, onPriorityChange }: { message: Mail; deleting: boolean; error: string | null; onBack: () => void; onDelete?: () => void; onPriorityChange: (priority: Priority) => void }) {
+function MailDetail({ message, deleting, error, onBack, onDelete, onPriorityChange, onStar }: { message: Mail; deleting: boolean; error: string | null; onBack: () => void; onDelete?: () => void; onPriorityChange: (priority: Priority) => void; onStar: () => void }) {
   const sender = formatSender(message.from);
   const date = new Date(message.date);
   const fullTime = Number.isNaN(date.getTime())
     ? message.date
     : new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline);
+  const [composeMode, setComposeMode] = useState<"reply" | "forward" | null>(null);
+  const [recipient, setRecipient] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<string | null>(null);
+
+  const openComposer = (mode: "reply" | "forward") => {
+    setComposeMode(mode);
+    setRecipient("");
+    setBody("");
+    setSendStatus(null);
+  };
+
+  const sendMessage = async () => {
+    if (!composeMode || !body.trim() || (composeMode === "forward" && !recipient.trim())) return;
+    setSending(true);
+    setSendStatus(null);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: composeMode, to: recipient, body }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Message could not be sent.");
+      setComposeMode(null);
+      setRecipient("");
+      setBody("");
+      setSendStatus(composeMode === "reply" ? "Reply sent." : "Message forwarded.");
+    } catch (sendError) {
+      setSendStatus(sendError instanceof Error ? sendError.message : "Message could not be sent.");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <section className="min-h-screen bg-white">
       <div className="sticky top-0 z-10 flex h-[72px] items-center gap-2 border-b border-[#e7e5df] bg-white/95 px-5 backdrop-blur md:px-8">
         <button type="button" onClick={onBack} aria-label="Back to email list" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="back" className="h-6 w-6" /></button>
+        <button type="button" onClick={onStar} aria-label={message.starred ? "Remove star" : "Add star"} aria-pressed={message.starred} className={`flex h-11 w-11 items-center justify-center rounded-full text-2xl transition hover:bg-[#f1f0ec] ${message.starred ? "text-[#e7b928]" : "text-[#77736b]"}`}>{message.starred ? "★" : "☆"}</button>
+        {!message.draft && <button type="button" onClick={() => openComposer("reply")} aria-label="Reply" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="reply" /></button>}
+        {!message.draft && <button type="button" onClick={() => openComposer("forward")} aria-label="Forward" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="forward" /></button>}
         {onDelete && <button type="button" onClick={onDelete} disabled={deleting} aria-label="Move to trash" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec] disabled:opacity-40"><Icon name="trash" className="h-5 w-5" /></button>}
         {deleting && <span className="ml-2 text-xs text-[#8f8b82]">Moving to trash…</span>}
       </div>
@@ -132,6 +183,26 @@ function MailDetail({ message, deleting, error, onBack, onDelete, onPriorityChan
           <time className="shrink-0 pt-1 text-xs text-[#8f8b82] md:text-sm">{fullTime}</time>
         </div>
         <div className="mx-auto mt-8 max-w-[900px] overflow-hidden rounded-xl bg-white"><EmailBody html={message.html} /></div>
+        {visibleAttachments.length > 0 && <section className="mx-auto mt-8 max-w-[900px] border-t border-[#eceae5] pt-6">
+          <h2 className="flex items-center gap-2 text-base font-bold text-[#302f2a]"><Icon name="paperclip" />Attachments ({visibleAttachments.length})</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {visibleAttachments.map((attachment) => <div key={attachment.partId} className="flex min-w-0 items-center gap-3 rounded-xl border border-[#e5e2dc] bg-[#faf9f6] p-4">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-[#5944d8]"><Icon name="paperclip" /></span>
+              <span className="min-w-0 flex-1"><strong className="block truncate text-sm">{attachment.filename}</strong><small className="mt-1 block text-xs text-[#8b877f]">{attachment.mimeType} · {formatBytes(attachment.size)}</small></span>
+              <span className="flex shrink-0 gap-1">
+                {/^(image\/|application\/pdf$)/i.test(attachment.mimeType) && <a href={attachment.previewUrl} target="_blank" rel="noreferrer" className="rounded-lg px-2 py-2 text-xs font-bold text-[#5944d8] hover:bg-[#eeecfb]">Preview</a>}
+                <a href={attachment.downloadUrl} aria-label={`Download ${attachment.filename}`} className="rounded-lg p-2 text-[#5f5c55] hover:bg-[#eeecfb]"><Icon name="download" /></a>
+              </span>
+            </div>)}
+          </div>
+        </section>}
+        {sendStatus && <p className={`mx-auto mt-6 max-w-[900px] rounded-lg px-4 py-3 text-sm ${sendStatus.endsWith("sent.") || sendStatus.endsWith("forwarded.") ? "bg-[#e8f1ee] text-[#416c60]" : "bg-[#fce9e9] text-[#a82f35]"}`}>{sendStatus}</p>}
+        {composeMode && <section className="mx-auto mt-8 max-w-[900px] rounded-2xl border border-[#dedbd4] bg-[#faf9f6] p-5 shadow-sm">
+          <div className="flex items-center justify-between"><h2 className="text-base font-bold">{composeMode === "reply" ? `Reply to ${sender}` : "Forward message"}</h2><button type="button" onClick={() => setComposeMode(null)} className="rounded-lg px-3 py-1 text-sm text-[#77736b] hover:bg-black/5">Cancel</button></div>
+          {composeMode === "forward" && <label className="mt-4 block text-sm font-semibold">To<input value={recipient} onChange={(event) => setRecipient(event.target.value)} type="email" placeholder="recipient@example.com" className="mt-2 block w-full rounded-lg border border-[#dedbd4] bg-white px-3 py-2 font-normal outline-none focus:border-[#5944d8]" /></label>}
+          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder={composeMode === "reply" ? "Write a reply…" : "Add a message…"} rows={7} className="mt-4 block w-full resize-y rounded-lg border border-[#dedbd4] bg-white p-3 text-sm outline-none focus:border-[#5944d8]" />
+          <div className="mt-4 flex justify-end"><button type="button" onClick={() => void sendMessage()} disabled={sending || !body.trim() || (composeMode === "forward" && !recipient.trim())} className="rounded-lg bg-[#5944d8] px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{sending ? "Sending…" : "Send"}</button></div>
+        </section>}
       </article>
     </section>
   );
@@ -315,6 +386,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const toggleStar = async (message: Mail) => {
     const starred = !message.starred;
     setMessages((current) => current.map((item) => item.id === message.id ? { ...item, starred } : item));
+    setSelectedMail((current) => current?.id === message.id ? { ...current, starred } : current);
     try {
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}`, {
         method: "PATCH",
@@ -327,6 +399,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       }
     } catch (starError) {
       setMessages((current) => current.map((item) => item.id === message.id ? { ...item, starred: message.starred } : item));
+      setSelectedMail((current) => current?.id === message.id ? { ...current, starred: message.starred } : current);
       setError(starError instanceof Error ? starError.message : "별표 상태를 저장하지 못했습니다.");
     }
   };
@@ -450,12 +523,14 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       <div className="min-w-0 lg:ml-[220px]">
         {selectedMail ? (
           <MailDetail
+            key={selectedMail.id}
             message={selectedMail}
             deleting={deleting}
             error={error}
             onBack={() => setSelectedMail(null)}
             onDelete={view === "trash" ? undefined : () => void moveSelectedMailToTrash()}
             onPriorityChange={(priority) => void changePriority(priority)}
+            onStar={() => void toggleStar(selectedMail)}
           />
         ) : (
           <>

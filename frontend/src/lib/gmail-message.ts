@@ -4,6 +4,16 @@ import type { gmail_v1 } from "googleapis";
 // conversion. Cap each message so a 10-message response stays reasonable.
 const MAX_HTML_LENGTH = 200_000;
 
+export type GmailAttachment = {
+  partId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  inline: boolean;
+  previewUrl: string;
+  downloadUrl: string;
+};
+
 function decodeBase64Url(value: string) {
   return Buffer.from(value, "base64url").toString("utf8");
 }
@@ -24,6 +34,70 @@ function findBodyByMimeType(
   }
 
   return null;
+}
+
+function partHeaders(part: gmail_v1.Schema$MessagePart) {
+  return new Map(
+    (part.headers ?? []).map((header) => [
+      header.name?.toLowerCase() ?? "",
+      header.value ?? "",
+    ]),
+  );
+}
+
+function attachmentPath(messageId: string, partId: string, download = false) {
+  const path = `/api/gmail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(partId)}`;
+  return download ? `${path}?download=1` : path;
+}
+
+function collectAttachments(
+  messageId: string,
+  part: gmail_v1.Schema$MessagePart | undefined,
+  attachments: GmailAttachment[] = [],
+  contentIds = new Map<string, GmailAttachment>(),
+) {
+  if (!part) return { attachments, contentIds };
+
+  const headers = partHeaders(part);
+  const contentId = (headers.get("content-id") ?? "").trim().replace(/^<|>$/g, "").toLowerCase();
+  const disposition = (headers.get("content-disposition") ?? "").toLowerCase();
+  const hasFileBody = Boolean(part.body?.attachmentId || (part.body?.data && part.filename));
+
+  if (part.partId && hasFileBody) {
+    const filename = part.filename || contentId || `attachment-${part.partId}`;
+    const attachment: GmailAttachment = {
+      partId: part.partId,
+      filename,
+      mimeType: part.mimeType || "application/octet-stream",
+      size: part.body?.size ?? 0,
+      inline: disposition.startsWith("inline") || Boolean(contentId),
+      previewUrl: attachmentPath(messageId, part.partId),
+      downloadUrl: attachmentPath(messageId, part.partId, true),
+    };
+    attachments.push(attachment);
+    if (contentId) contentIds.set(contentId, attachment);
+  }
+
+  for (const child of part.parts ?? []) {
+    collectAttachments(messageId, child, attachments, contentIds);
+  }
+  return { attachments, contentIds };
+}
+
+function restoreInlineImages(html: string, contentIds: Map<string, GmailAttachment>) {
+  return html.replace(
+    /\bsrc\s*=\s*(["'])cid:([^"']+)\1/gi,
+    (match, quote: string, rawContentId: string) => {
+      let contentId = rawContentId.trim().replace(/^<|>$/g, "").toLowerCase();
+      try {
+        contentId = decodeURIComponent(contentId);
+      } catch {
+        // Keep the original Content-ID when it is not URL encoded.
+      }
+      const attachment = contentIds.get(contentId);
+      return attachment ? `src=${quote}${attachment.previewUrl}${quote}` : match;
+    },
+  );
 }
 
 // Outlook/MSO conditional comments (e.g. `<!--[if !mso]><!-->...<!--<![endif]-->`)
@@ -172,9 +246,10 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
   // gets wrapped so every message renders through the same path.
   const htmlBody = findBodyByMimeType(message.payload, "text/html");
   const plainBody = findBodyByMimeType(message.payload, "text/plain");
+  const { attachments, contentIds } = collectAttachments(message.id ?? "", message.payload);
 
   const content = htmlBody
-    ? sanitizeEmailHtml(htmlBody).slice(0, MAX_HTML_LENGTH)
+    ? restoreInlineImages(sanitizeEmailHtml(htmlBody), contentIds).slice(0, MAX_HTML_LENGTH)
     : `<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(
         cleanPlainText(plainBody ?? message.snippet ?? ""),
       )}</pre>`;
@@ -189,6 +264,7 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
     unread: message.labelIds?.includes("UNREAD") ?? false,
     starred: message.labelIds?.includes("STARRED") ?? false,
     draft: message.labelIds?.includes("DRAFT") ?? false,
+    attachments,
     html: buildEmailDocument(content),
   };
 }
