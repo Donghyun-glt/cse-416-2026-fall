@@ -413,8 +413,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    const result = await response.json().catch(() => ({})) as { draft?: string; cached?: boolean; error?: string };
-    if (!response.ok || !result.draft) throw new Error(aiErrorMessage[result.error ?? ""] ?? "AI draft could not be generated.");
+    const result = await response.json().catch(() => ({})) as { draft?: string; cached?: boolean; error?: string; detail?: string };
+    if (!response.ok || !result.draft) {
+      const known = aiErrorMessage[result.error ?? ""];
+      throw new Error(known ?? `AI draft could not be generated${result.error ? ` (${result.error})` : ""}${result.detail ? `: ${result.detail}` : ""}.`);
+    }
     return { draft: result.draft, cached: Boolean(result.cached) };
   }, [message.id]);
 

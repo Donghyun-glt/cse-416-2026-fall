@@ -113,7 +113,7 @@ export async function POST(
     if (error instanceof GeminiError) {
       console.error("Gemini reply draft failed", error.code, error.message);
       const status = error.code === "rate_limited" ? 429 : error.code === "not_configured" ? 503 : 502;
-      return NextResponse.json({ error: `ai_${error.code}` }, { status });
+      return NextResponse.json({ error: `ai_${error.code}`, detail: `${error.message} (model: ${geminiModel()})` }, { status });
     }
     console.error("Gemini reply draft failed", error);
     return NextResponse.json({ error: "ai_request_failed" }, { status: 502 });
