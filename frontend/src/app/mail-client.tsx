@@ -8,7 +8,7 @@ import { MailDetail, formatSender, initials, type Mail } from "./mail-detail";
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
-type View = "briefing" | "all" | "starred" | "drafts" | "trash";
+type View = "briefing" | "all" | "starred" | "sent" | "drafts" | "trash";
 
 const priorityDisplay: Record<Priority, { label: string; className: string }> = {
   urgent: { label: "Urgent", className: "bg-[#fce9e9] text-[#a82f35]" },
@@ -21,7 +21,7 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${display.className}`}>{display.label}</span>;
 }
 
-function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "calendar" | "trash" | "back" | "star" | "draft" | "reply" | "forward" | "paperclip" | "download"; className?: string }) {
+function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "calendar" | "trash" | "back" | "star" | "sent" | "draft" | "reply" | "forward" | "paperclip" | "download"; className?: string }) {
   const paths = {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" /></>,
@@ -30,6 +30,7 @@ function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" 
     trash: <><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 10v7M14 10v7" /></>,
     back: <><path d="m15 18-6-6 6-6" /><path d="M9 12h11" /></>,
     star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" />,
+    sent: <><path d="m3 11 18-8-8 18-2-8z" /><path d="m11 13 10-10" /></>,
     draft: <><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5" /></>,
     reply: <><path d="m9 17-5-5 5-5" /><path d="M4 12h9a7 7 0 0 1 7 7" /></>,
     forward: <><path d="m15 17 5-5-5-5" /><path d="M20 12h-9a7 7 0 0 0-7 7" /></>,
@@ -282,7 +283,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setSelectedMail({ ...previous, priority });
     setMessages((current) => {
       const updated = current.map((message) => message.id === previous.id ? { ...message, priority } : message);
-      return view === "all" ? updated : updated.sort(comparePriority);
+      return view === "all" || view === "sent" ? updated : updated.sort(comparePriority);
     });
     setError(null);
     try {
@@ -411,6 +412,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
             <span className="hidden items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold text-[#aaa69c] lg:flex"><Icon name="calendar" />Calendar</span>
             <button type="button" onClick={() => changeView("all")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "all" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="inbox" /><span className="hidden sm:inline">All Emails</span></button>
             <button type="button" onClick={() => changeView("starred")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "starred" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="star" /><span className="hidden sm:inline">Starred</span></button>
+            <button type="button" onClick={() => changeView("sent")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "sent" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="sent" /><span className="hidden sm:inline">Sent</span></button>
             <button type="button" onClick={() => changeView("drafts")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "drafts" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="draft" /><span className="hidden sm:inline">Drafts</span></button>
             <button type="button" onClick={() => changeView("trash")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "trash" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="trash" /><span className="hidden sm:inline">Trash</span></button>
           </nav>
@@ -443,7 +445,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           />
         ) : (
           <>
-        <header className="border-b border-[#e4e2dd] bg-white px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "starred" ? "Starred" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-[#9a968c]">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}</div></header>
+        <header className="border-b border-[#e4e2dd] bg-white px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "starred" ? "Starred" : view === "sent" ? "Sent" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-[#9a968c]">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}</div></header>
 
         <div className="mx-auto max-w-[1200px] space-y-5 px-5 py-6 md:px-9">
           {view === "briefing" && <TodayCard />}
@@ -459,13 +461,13 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
               <div className="flex items-center gap-1"><button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} aria-label="Previous page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">‹</button><button type="button" onClick={goToNextPage} disabled={!nextPageToken} aria-label="Next page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">›</button></div>
             </div>}
             <div className="overflow-hidden rounded-2xl border border-[#e1ded8] bg-white shadow-[0_2px_8px_rgba(31,31,27,0.04)]">
-              {loading ? <div className="p-8 text-center text-sm text-[#98948a]">Loading messages…</div> : messages.length === 0 ? <div className="p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#eeecfb] text-[#5944d8]"><Icon name="inbox" /></div><p className="mt-4 font-bold">You&apos;re all caught up</p><p className="mt-1 text-sm text-[#99958c]">{view === "briefing" ? "No inbox messages have arrived since midnight." : "There are no inbox messages to show."}</p></div> : messages.map((message, index) => {
-                const sender = formatSender(message.from);
+              {loading ? <div className="p-8 text-center text-sm text-[#98948a]">Loading messages…</div> : messages.length === 0 ? <div className="p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#eeecfb] text-[#5944d8]"><Icon name="inbox" /></div><p className="mt-4 font-bold">You&apos;re all caught up</p><p className="mt-1 text-sm text-[#99958c]">{view === "briefing" ? "No inbox messages have arrived since midnight." : view === "sent" ? "You haven't sent any messages yet." : "There are no inbox messages to show."}</p></div> : messages.map((message, index) => {
+                const sender = view === "sent" ? `To: ${formatSender(message.to.split(",")[0] || "") || "(no recipient)"}` : formatSender(message.from);
                 const color = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"][index % 5];
                 const rowTone = !message.unread ? "bg-[#f1f1ef] hover:bg-[#eaeae7]" : "bg-white hover:bg-[#faf9f6]";
                 const startsGroup = index === 0 || messages[index - 1].priority !== message.priority;
                 return <article key={message.id} className={index ? "border-t border-[#deddd9]" : ""}>
-                  {startsGroup && view !== "all" && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
+                  {startsGroup && view !== "all" && view !== "sent" && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
                     <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="shrink-0 text-[#77736b]"><Icon name="paperclip" className="h-4 w-4" /></span>}{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>

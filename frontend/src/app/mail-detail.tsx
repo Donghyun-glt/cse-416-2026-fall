@@ -382,11 +382,14 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
+  const sentByMe = Boolean(myEmail) && senderAddress(message.from).toLowerCase() === myEmail.toLowerCase();
   const automated = looksAutomated(message.from, message.unsubscribeUrl);
+  // Messages the user sent get no AI panel at all (nothing to reply to).
+  const showAiPanel = !message.draft && !sentByMe;
   const [aiTone, setAiTone] = useState<ReplyTone>("professional");
   const [aiLength, setAiLength] = useState<ReplyLength>("medium");
   const [suggestion, setSuggestion] = useState<{ status: "skipped" | "loading" | "ready" | "error" | "sent"; draft: string; cached: boolean; message: string }>(
-    { status: message.draft || automated ? "skipped" : "loading", draft: "", cached: false, message: "" },
+    { status: message.draft || sentByMe || automated ? "skipped" : "loading", draft: "", cached: false, message: "" },
   );
   const [replyAll, setReplyAll] = useState(false);
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
@@ -445,9 +448,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   // (MailDetail is keyed by message id, so this runs once per opened message).
   // Cached on the server, so reopening the same message costs no LLM call.
   useEffect(() => {
-    if (message.draft || automated) return;
+    if (message.draft || sentByMe || automated) return;
     return loadSuggestion({ tone: "professional", length: "medium", regenerate: false });
-  }, [message.draft, automated, loadSuggestion]);
+  }, [message.draft, sentByMe, automated, loadSuggestion]);
 
   const changeSuggestionOptions = (tone: ReplyTone, length: ReplyLength) => {
     setAiTone(tone);
@@ -563,7 +566,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         </span>
       </div>
 
-      <div className="flex-1 lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-6 lg:bg-[#f6f8fc] lg:px-6 lg:py-5 xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className={`flex-1 lg:items-start lg:bg-[#f6f8fc] lg:px-6 lg:py-5 ${showAiPanel ? "lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]" : ""}`}>
       <div className="min-w-0 lg:rounded-2xl lg:border lg:border-[#e3e3e3] lg:bg-white lg:pb-6">
         {error && <p className="mx-4 mb-2 rounded-lg bg-[#fce8e6] px-4 py-3 text-sm text-[#a50e0e] sm:ml-[72px]">{error}</p>}
 
@@ -695,7 +698,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       </div>
 
       {/* ---------- Right column: AI reply panel ---------- */}
-      {!message.draft && (
+      {showAiPanel && (
         <aside className="mx-4 mt-6 lg:sticky lg:top-16 lg:mx-0 lg:mt-0">
           <div className="rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
             <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#5b4bd6]">

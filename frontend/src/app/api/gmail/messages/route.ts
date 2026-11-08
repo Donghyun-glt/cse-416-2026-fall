@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       ? Math.floor(afterTimestamp / 1000)
       : undefined;
     const requestedMode = request.nextUrl.searchParams.get("mode");
-    const mailboxMode = requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash"
+    const mailboxMode = requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash" || requestedMode === "sent"
       ? requestedMode
       : "all";
     const requestedPageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
@@ -48,7 +48,12 @@ export async function GET(request: NextRequest) {
           ? ["DRAFT"]
         : mailboxMode === "trash"
           ? ["TRASH"]
+        : mailboxMode === "sent"
+          ? ["SENT"]
           : undefined;
+    // "All Emails" is everything you received (inbox + archived); mail you sent
+    // has its own Sent view, like Gmail.
+    const excludeSent = !isDailyBriefing && mailboxMode === "all";
 
     do {
       const list = await gmail.users.messages.list({
@@ -57,7 +62,7 @@ export async function GET(request: NextRequest) {
         includeSpamTrash: mailboxMode === "trash",
         maxResults: isDailyBriefing ? 100 : 50,
         pageToken,
-        q: afterSeconds ? `after:${afterSeconds}` : undefined,
+        q: [afterSeconds ? `after:${afterSeconds}` : "", excludeSent ? "-in:sent" : ""].filter(Boolean).join(" ") || undefined,
       });
 
       messageIds.push(
