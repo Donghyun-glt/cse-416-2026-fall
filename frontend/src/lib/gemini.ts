@@ -1,8 +1,8 @@
 // Minimal Gemini API client. Uses the REST endpoint directly so no extra
-// dependency is needed; the free tier of gemini-2.5-flash-lite is enough for
-// development and testing (see .env.example for GEMINI_API_KEY).
+// dependency is needed; the free tier of gemini-3.5-flash-lite is enough for
+// development and testing (see .env.example for GEMINI_API_KEY). Override with GEMINI_MODEL.
 
-const DEFAULT_MODEL = "gemini-2.5-flash-lite";
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 export type GeminiErrorCode = "not_configured" | "rate_limited" | "request_failed" | "empty_response";

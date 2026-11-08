@@ -63,7 +63,7 @@ for (const fixture of fixtures) {
         report.push(`## ${label}`, "", `**FAILED:** ${message}`, "");
         if (/rate limit/i.test(message)) { console.log("Waiting 20s for the free-tier rate limit…"); await new Promise((r) => setTimeout(r, 20_000)); }
       }
-      // Free tier is ~15 requests/minute on flash-lite; a small pause keeps batch runs under it.
+      // Free tier is ~15 requests/minute on flash-lite (check aistudio.google.com/rate-limit); a small pause keeps batch runs under it.
       await new Promise((r) => setTimeout(r, 4_500));
     }
   }
