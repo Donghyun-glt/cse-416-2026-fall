@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Priority } from "@/lib/mail-priority";
 import type { GmailAttachment } from "@/lib/gmail-message";
-import { REPLY_LENGTHS, REPLY_TONES, type ReplyLength, type ReplyTone } from "@/lib/reply-draft";
+import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
 
 export type Mail = {
   id: string;
@@ -24,8 +24,17 @@ export type Mail = {
 
 type ComposeMode = "reply" | "replyAll" | "forward";
 
-const toneLabel: Record<ReplyTone, string> = { professional: "Professional", friendly: "Friendly", concise: "Concise", formal: "Formal" };
-const lengthLabel: Record<ReplyLength, string> = { short: "Short", medium: "Medium", long: "Long" };
+// Slider stops for the AI panel (left -> right).
+const TONE_STOPS: ReplyTone[] = ["friendly", "professional", "formal"];
+const LENGTH_STOPS: ReplyLength[] = ["short", "medium", "long"];
+const toneLabel: Record<ReplyTone, string> = { friendly: "Friendly", professional: "Professional", concise: "Concise", formal: "Formal" };
+const lengthLabel: Record<ReplyLength, string> = { short: "Short", medium: "Medium", long: "Detailed" };
+
+/** System-generated mail (no-reply senders, list mail) does not expect a reply, so no draft is generated up front. */
+function looksAutomated(from: string, unsubscribeUrl: string) {
+  return Boolean(unsubscribeUrl) || /(?:^|[<\s"'])(?:no-?reply|do-?not-?reply|notifications?|noreply|mailer-daemon|newsletter|alerts?|info|support|marketing|news)[+.\w-]*@/i.test(from);
+}
+
 const aiErrorMessage: Record<string, string> = {
   ai_not_configured: "AI drafting is not configured on this server (GEMINI_API_KEY missing).",
   ai_rate_limited: "AI is busy right now. Wait a few seconds and try again.",
@@ -373,11 +382,15 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
+  const automated = looksAutomated(message.from, message.unsubscribeUrl);
   const [aiTone, setAiTone] = useState<ReplyTone>("professional");
   const [aiLength, setAiLength] = useState<ReplyLength>("medium");
-  const [aiInstructions, setAiInstructions] = useState("");
-  const [drafting, setDrafting] = useState(false);
-  const [suggestion, setSuggestion] = useState<{ status: "idle" | "loading" | "ready" | "error"; draft: string; cached: boolean; message: string }>({ status: message.draft ? "idle" : "loading", draft: "", cached: false, message: "" });
+  const [suggestion, setSuggestion] = useState<{ status: "skipped" | "loading" | "ready" | "error" | "sent"; draft: string; cached: boolean; message: string }>(
+    { status: message.draft || automated ? "skipped" : "loading", draft: "", cached: false, message: "" },
+  );
+  const [replyAll, setReplyAll] = useState(false);
+  const [sendingSuggestion, setSendingSuggestion] = useState(false);
+  const suggestionRef = useRef<HTMLTextAreaElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -399,7 +412,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setForwardTo("");
     setBody("");
     setComposeError(null);
-    setAiInstructions("");
     setMoreOpen(false);
     window.setTimeout(() => {
       composerRef.current?.focus();
@@ -407,11 +419,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     }, 0);
   };
 
-  const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; instructions: string; regenerate: boolean }) => {
+  const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
     const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/reply-draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, instructions: "" }),
     });
     const result = await response.json().catch(() => ({})) as { draft?: string; cached?: boolean; error?: string; detail?: string };
     if (!response.ok || !result.draft) {
@@ -421,36 +433,53 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     return { draft: result.draft, cached: Boolean(result.cached) };
   }, [message.id]);
 
-  // Generate a suggested reply as soon as the message is opened (MailDetail is
-  // keyed by message id, so this runs once per opened message). Cached on the
-  // server per message, so reopening does not cost another LLM call.
-  useEffect(() => {
-    if (message.draft) return;
+  const loadSuggestion = useCallback((input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
     let cancelled = false;
-    requestDraft({ tone: "professional", length: "medium", instructions: "", regenerate: false })
+    requestDraft(input)
       .then((result) => { if (!cancelled) setSuggestion({ status: "ready", draft: result.draft, cached: result.cached, message: "" }); })
       .catch((suggestError) => { if (!cancelled) setSuggestion({ status: "error", draft: "", cached: false, message: suggestError instanceof Error ? suggestError.message : "AI draft could not be generated." }); });
     return () => { cancelled = true; };
-  }, [message.draft, requestDraft]);
+  }, [requestDraft]);
 
-  const generateDraft = async (regenerate = true) => {
-    if (!composeMode || composeMode === "forward" || drafting) return;
-    setDrafting(true);
-    setComposeError(null);
-    try {
-      const result = await requestDraft({ tone: aiTone, length: aiLength, instructions: aiInstructions, regenerate });
-      setBody(result.draft);
-      window.setTimeout(() => composerRef.current?.focus(), 0);
-    } catch (draftError) {
-      setComposeError(draftError instanceof Error ? draftError.message : "AI draft could not be generated.");
-    } finally {
-      setDrafting(false);
-    }
+  // Generate a suggested reply as soon as a person-to-person message is opened
+  // (MailDetail is keyed by message id, so this runs once per opened message).
+  // Cached on the server, so reopening the same message costs no LLM call.
+  useEffect(() => {
+    if (message.draft || automated) return;
+    return loadSuggestion({ tone: "professional", length: "medium", regenerate: false });
+  }, [message.draft, automated, loadSuggestion]);
+
+  const changeSuggestionOptions = (tone: ReplyTone, length: ReplyLength) => {
+    setAiTone(tone);
+    setAiLength(length);
+    setSuggestion((current) => ({ ...current, status: "loading", message: "" }));
+    loadSuggestion({ tone, length, regenerate: false });
   };
 
-  const applySuggestion = (mode: ComposeMode) => {
-    openComposer(mode);
-    setBody(suggestion.draft);
+  const regenerateSuggestion = () => {
+    setSuggestion((current) => ({ ...current, status: "loading", message: "" }));
+    loadSuggestion({ tone: aiTone, length: aiLength, regenerate: true });
+  };
+
+  const sendSuggestion = async () => {
+    const text = suggestion.draft.trim();
+    if (!text || sendingSuggestion) return;
+    setSendingSuggestion(true);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: replyAll && canReplyAll ? "replyAll" : "reply", body: text }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Reply could not be sent.");
+      setSuggestion((current) => ({ ...current, status: "sent" }));
+      setToast("Reply sent");
+    } catch (sendError) {
+      setSuggestion((current) => ({ ...current, message: sendError instanceof Error ? sendError.message : "Reply could not be sent." }));
+    } finally {
+      setSendingSuggestion(false);
+    }
   };
 
   const sendMessage = async () => {
@@ -534,7 +563,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         </span>
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-6 lg:bg-[#f6f8fc] lg:px-6 lg:py-5 xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className="min-w-0 lg:rounded-2xl lg:border lg:border-[#e3e3e3] lg:bg-white lg:pb-6">
         {error && <p className="mx-4 mb-2 rounded-lg bg-[#fce8e6] px-4 py-3 text-sm text-[#a50e0e] sm:ml-[72px]">{error}</p>}
 
         {/* ---------- Subject + labels ---------- */}
@@ -628,27 +658,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
           </div>
         )}
 
-        {/* ---------- AI suggested reply (auto-generated when the message opens) ---------- */}
-        {!message.draft && !composeMode && suggestion.status !== "idle" && (
-          <div className="mx-4 mt-6 rounded-lg border border-[#dde3ea] bg-[#f8fafd] p-4 sm:ml-[72px] sm:mr-6">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#0b57d0]">
-              <GIcon name="sparkle" className="h-4 w-4" />Suggested reply
-              {suggestion.status === "ready" && <span className="font-normal normal-case tracking-normal text-[#5e5e5e]">{suggestion.cached ? "· saved" : "· just generated"}</span>}
-            </div>
-            {suggestion.status === "loading" && <p className="text-sm text-[#5e5e5e]">Generating a reply with AI…</p>}
-            {suggestion.status === "error" && <p className="text-sm text-[#a50e0e]">{suggestion.message}</p>}
-            {suggestion.status === "ready" && (
-              <>
-                <p className="whitespace-pre-wrap text-sm leading-6 text-[#1f1f1f]">{suggestion.draft}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => applySuggestion("reply")} className="h-9 rounded-full bg-[#0b57d0] px-5 text-sm font-medium text-white transition hover:bg-[#0a4ebb]">Use this reply</button>
-                  {canReplyAll && <button type="button" onClick={() => applySuggestion("replyAll")} className={pillClass}>Use for reply all</button>}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
         {/* ---------- Inline composer (replaces the bottom bar, like Gmail) ---------- */}
         {composeMode && (
           <div className="flex gap-3 px-4 pb-8 pt-6 sm:gap-4">
@@ -666,25 +675,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                   </span>
                 )}
               </div>
-              {composeMode !== "forward" && (
-                <div className="flex flex-wrap items-center gap-2 border-b border-[#e0e0e0] bg-[#f8fafd] px-3 py-2 text-xs">
-                  <button type="button" onClick={() => void generateDraft()} disabled={drafting || sending}
-                    className="flex h-8 items-center gap-1.5 rounded-full bg-[#e9eef6] px-3 font-medium text-[#0b57d0] transition-colors hover:bg-[#dde3ea] disabled:cursor-not-allowed disabled:opacity-50">
-                    <GIcon name="sparkle" className="h-4 w-4" />{drafting ? "Drafting…" : "Regenerate with AI"}
-                  </button>
-                  <select value={aiTone} onChange={(event) => setAiTone(event.target.value as ReplyTone)} aria-label="Reply tone" disabled={drafting}
-                    className="h-8 rounded-full border border-[#c4c7c5] bg-white px-2 text-[#1f1f1f] outline-none">
-                    {REPLY_TONES.map((tone) => <option key={tone} value={tone}>{toneLabel[tone]}</option>)}
-                  </select>
-                  <select value={aiLength} onChange={(event) => setAiLength(event.target.value as ReplyLength)} aria-label="Reply length" disabled={drafting}
-                    className="h-8 rounded-full border border-[#c4c7c5] bg-white px-2 text-[#1f1f1f] outline-none">
-                    {REPLY_LENGTHS.map((length) => <option key={length} value={length}>{lengthLabel[length]}</option>)}
-                  </select>
-                  <input value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} type="text" maxLength={500} disabled={drafting}
-                    placeholder="Optional: what should the reply say? (e.g. accept, but ask to move to Friday)" aria-label="Instructions for the AI draft"
-                    className="h-8 min-w-[200px] flex-1 rounded-full border border-[#c4c7c5] bg-white px-3 text-[#1f1f1f] outline-none placeholder:text-[#5e5e5e]" />
-                </div>
-              )}
               <textarea ref={composerRef} value={body} onChange={(event) => setBody(event.target.value)} rows={6} aria-label="Message body"
                 className="block w-full resize-y bg-transparent px-4 py-3 text-sm leading-6 outline-none" />
               {composeMode === "forward" && visibleAttachments.length > 0 && (
@@ -694,7 +684,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
               )}
               {composeError && <p className="mx-4 mb-3 rounded bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{composeError}</p>}
               <div className="flex items-center gap-2 px-4 pb-3">
-                <button type="button" onClick={() => void sendMessage()} disabled={sending || drafting || !body.trim() || (composeMode === "forward" && !forwardTo.trim())}
+                <button type="button" onClick={() => void sendMessage()} disabled={sending || !body.trim() || (composeMode === "forward" && !forwardTo.trim())}
                   className="h-9 rounded-full bg-[#0b57d0] px-6 text-sm font-medium text-white transition hover:bg-[#0a4ebb] hover:shadow-[0_1px_3px_1px_rgba(0,0,0,.15)] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
                 <span className="ml-auto" />
                 <ToolbarButton icon="trash" label="Discard draft" onClick={() => setComposeMode(null)} />
@@ -704,9 +694,91 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         )}
       </div>
 
+      {/* ---------- Right column: AI reply panel ---------- */}
+      {!message.draft && (
+        <aside className="mx-4 mt-6 lg:sticky lg:top-16 lg:mx-0 lg:mt-0">
+          <div className="rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
+            <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#5b4bd6]">
+              <GIcon name="sparkle" className="h-4 w-4" />Suggested reply
+              {suggestion.status === "ready" && <span className="font-normal normal-case tracking-normal text-[#7a7a7a]">{suggestion.cached ? "· saved" : "· just generated"}</span>}
+            </div>
+
+            {suggestion.status === "skipped" && (
+              <>
+                <div className="mb-4 flex gap-3 rounded-xl bg-[#f3f3f1] p-4">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5e5e5e] text-white"><GIcon name="unread" className="h-5 w-5" /></span>
+                  <div className="text-sm">
+                    <p className="font-semibold text-[#1f1f1f]">Automated notification</p>
+                    <p className="mt-0.5 text-[#5e5e5e]">This looks like a system-generated message rather than a note from a person, so no reply draft was generated.</p>
+                  </div>
+                </div>
+                <p className="text-sm text-[#5e5e5e]">Notifications like this don&apos;t usually expect a reply — but you can still have one drafted if you need it.</p>
+                <div className="mt-4 flex justify-end">
+                  <button type="button" onClick={() => changeSuggestionOptions(aiTone, aiLength)} className="flex h-10 items-center gap-2 rounded-lg bg-[#5b4bd6] px-4 text-sm font-semibold text-white hover:bg-[#4b3dc0]"><GIcon name="reply" className="h-4 w-4" />Reply anyway</button>
+                </div>
+              </>
+            )}
+
+            {suggestion.status === "sent" && (
+              <div className="rounded-xl bg-[#e6f4ea] p-4 text-sm text-[#0d652d]">
+                <p className="font-semibold">Reply sent</p>
+                <p className="mt-1 whitespace-pre-wrap text-[#1f1f1f]/80">{suggestion.draft}</p>
+              </div>
+            )}
+
+            {(suggestion.status === "loading" || suggestion.status === "ready" || suggestion.status === "error") && (
+              <>
+                <div className="relative rounded-xl border border-[#e3e3e3] bg-[#fbfbfb]">
+                  <textarea ref={suggestionRef} value={suggestion.draft} onChange={(event) => setSuggestion((current) => ({ ...current, draft: event.target.value }))}
+                    rows={10} aria-label="Suggested reply" disabled={suggestion.status === "loading"} placeholder={suggestion.status === "error" ? "" : "Generating a reply with AI…"}
+                    className="block min-h-[220px] w-full resize-y rounded-xl bg-transparent px-4 py-3 text-sm leading-6 text-[#1f1f1f] outline-none focus:ring-2 focus:ring-[#5b4bd6]/30 disabled:text-[#9a9a9a]" />
+                  {suggestion.status === "loading" && <span className="pointer-events-none absolute right-3 top-3 h-4 w-4 animate-spin rounded-full border-2 border-[#5b4bd6]/30 border-t-[#5b4bd6]" aria-hidden="true" />}
+                </div>
+                {suggestion.status === "error" && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
+                {suggestion.status === "ready" && suggestion.message && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
+
+                <div className="mt-4 space-y-3">
+                  <label className="block text-xs text-[#5e5e5e]">
+                    <span className="flex justify-between"><span>Friendly</span><span className="font-medium text-[#1f1f1f]">{toneLabel[aiTone]}</span><span>Formal</span></span>
+                    <input type="range" min={0} max={TONE_STOPS.length - 1} step={1} value={TONE_STOPS.indexOf(aiTone)} disabled={suggestion.status === "loading"}
+                      onChange={(event) => changeSuggestionOptions(TONE_STOPS[Number(event.target.value)], aiLength)} aria-label="Reply tone" className="mt-1 w-full accent-[#5b4bd6]" />
+                  </label>
+                  <label className="block text-xs text-[#5e5e5e]">
+                    <span className="flex justify-between"><span>Short</span><span className="font-medium text-[#1f1f1f]">{lengthLabel[aiLength]}</span><span>Detailed</span></span>
+                    <input type="range" min={0} max={LENGTH_STOPS.length - 1} step={1} value={LENGTH_STOPS.indexOf(aiLength)} disabled={suggestion.status === "loading"}
+                      onChange={(event) => changeSuggestionOptions(aiTone, LENGTH_STOPS[Number(event.target.value)])} aria-label="Reply length" className="mt-1 w-full accent-[#5b4bd6]" />
+                  </label>
+                </div>
+
+                {canReplyAll && (
+                  <label className="mt-3 flex items-center gap-2 text-xs text-[#5e5e5e]">
+                    <input type="checkbox" checked={replyAll} onChange={(event) => setReplyAll(event.target.checked)} className="accent-[#5b4bd6]" />
+                    Reply to everyone ({otherRecipients.map((recipient) => formatSender(recipient)).join(", ")})
+                  </label>
+                )}
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={regenerateSuggestion} disabled={suggestion.status === "loading" || sendingSuggestion}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">
+                    <GIcon name="sparkle" className="h-4 w-4" />Regenerate
+                  </button>
+                  <button type="button" onClick={() => suggestionRef.current?.focus()} disabled={suggestion.status !== "ready"}
+                    className="h-10 rounded-lg px-3 text-sm font-semibold text-[#5e5e5e] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">Edit manually</button>
+                  <button type="button" onClick={() => void sendSuggestion()} disabled={suggestion.status !== "ready" || !suggestion.draft.trim() || sendingSuggestion}
+                    className="ml-auto flex h-10 items-center gap-2 rounded-lg bg-[#5b4bd6] px-4 text-sm font-semibold text-white hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">
+                    <GIcon name="forward" className="h-4 w-4" />{sendingSuggestion ? "Sending…" : "Send reply"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </aside>
+      )}
+      </div>
+
       {/* ---------- Fixed bottom action bar (Reply / Reply all / Forward) ---------- */}
       {!composeMode && !message.draft && (
-        <div className="sticky bottom-0 z-20 border-t border-[#f1f1f1] bg-white/95 backdrop-blur-sm">
+        <div className="sticky bottom-0 z-20 border-t border-[#f1f1f1] bg-white/95 backdrop-blur-sm lg:static lg:border-0 lg:bg-[#f6f8fc]">
           <div className="flex flex-wrap items-center gap-2 px-4 py-4 sm:gap-3 sm:pl-[72px]">
             <button type="button" onClick={() => openComposer("reply")} className={pillClass}><GIcon name="reply" />Reply</button>
             {canReplyAll && <button type="button" onClick={() => openComposer("replyAll")} className={pillClass}><GIcon name="replyAll" />Reply all</button>}
