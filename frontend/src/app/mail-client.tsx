@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
-import type { GmailAttachment } from "@/lib/gmail-message";
+import { MailDetail, formatSender, initials, type Mail } from "./mail-detail";
 
-type Mail = { id: string; subject: string; from: string; date: string; snippet: string; html: string; unread: boolean; starred: boolean; draft: boolean; priority: Priority; attachments: GmailAttachment[] };
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
@@ -40,22 +39,6 @@ function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" 
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
 }
 
-function formatBytes(value: number) {
-  if (!value) return "Unknown size";
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatSender(from: string) {
-  const match = from.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
-  return match ? match[1].trim() || match[2].trim() : from.trim();
-}
-
-function initials(value: string) {
-  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "M";
-}
-
 function formatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -73,26 +56,6 @@ function greeting() {
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
-}
-
-function EmailBody({ html }: { html: string }) {
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
-  const [height, setHeight] = useState(180);
-  const syncHeight = useCallback(() => {
-    const doc = frameRef.current?.contentDocument;
-    if (doc) setHeight(Math.max(180, doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0));
-  }, []);
-  const handleLoad = useCallback(() => {
-    syncHeight();
-    const body = frameRef.current?.contentDocument?.body;
-    if (!body) return;
-    observerRef.current?.disconnect();
-    observerRef.current = new ResizeObserver(syncHeight);
-    observerRef.current.observe(body);
-  }, [syncHeight]);
-  useEffect(() => () => observerRef.current?.disconnect(), []);
-  return <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="메일 본문" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="w-full border-0 bg-white" style={{ height }} />;
 }
 
 function TodayCard() {
@@ -116,98 +79,6 @@ function TodayCard() {
   );
 }
 
-function MailDetail({ message, deleting, error, onBack, onDelete, onPriorityChange, onStar }: { message: Mail; deleting: boolean; error: string | null; onBack: () => void; onDelete?: () => void; onPriorityChange: (priority: Priority) => void; onStar: () => void }) {
-  const sender = formatSender(message.from);
-  const date = new Date(message.date);
-  const fullTime = Number.isNaN(date.getTime())
-    ? message.date
-    : new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
-  const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline);
-  const [composeMode, setComposeMode] = useState<"reply" | "forward" | null>(null);
-  const [recipient, setRecipient] = useState("");
-  const [body, setBody] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendStatus, setSendStatus] = useState<string | null>(null);
-
-  const openComposer = (mode: "reply" | "forward") => {
-    setComposeMode(mode);
-    setRecipient("");
-    setBody("");
-    setSendStatus(null);
-  };
-
-  const sendMessage = async () => {
-    if (!composeMode || !body.trim() || (composeMode === "forward" && !recipient.trim())) return;
-    setSending(true);
-    setSendStatus(null);
-    try {
-      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: composeMode, to: recipient, body }),
-      });
-      const result = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Message could not be sent.");
-      setComposeMode(null);
-      setRecipient("");
-      setBody("");
-      setSendStatus(composeMode === "reply" ? "Reply sent." : "Message forwarded.");
-    } catch (sendError) {
-      setSendStatus(sendError instanceof Error ? sendError.message : "Message could not be sent.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <section className="min-h-screen bg-white">
-      <div className="sticky top-0 z-10 flex h-[72px] items-center gap-2 border-b border-[#e7e5df] bg-white/95 px-5 backdrop-blur md:px-8">
-        <button type="button" onClick={onBack} aria-label="Back to email list" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="back" className="h-6 w-6" /></button>
-        <button type="button" onClick={onStar} aria-label={message.starred ? "Remove star" : "Add star"} aria-pressed={message.starred} className={`flex h-11 w-11 items-center justify-center rounded-full text-2xl transition hover:bg-[#f1f0ec] ${message.starred ? "text-[#e7b928]" : "text-[#77736b]"}`}>{message.starred ? "★" : "☆"}</button>
-        {!message.draft && <button type="button" onClick={() => openComposer("reply")} aria-label="Reply" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="reply" /></button>}
-        {!message.draft && <button type="button" onClick={() => openComposer("forward")} aria-label="Forward" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec]"><Icon name="forward" /></button>}
-        {onDelete && <button type="button" onClick={onDelete} disabled={deleting} aria-label="Move to trash" className="flex h-11 w-11 items-center justify-center rounded-full text-[#5f5c55] transition hover:bg-[#f1f0ec] disabled:opacity-40"><Icon name="trash" className="h-5 w-5" /></button>}
-        {deleting && <span className="ml-2 text-xs text-[#8f8b82]">Moving to trash…</span>}
-      </div>
-      <article className="mx-auto max-w-[1050px] px-5 py-8 md:px-10 md:py-12">
-        {error && <p className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
-        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.025em] text-[#282722] md:text-[34px]">{message.subject}</h1>
-        {!message.draft && <label className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#68645d]">Priority
-          <select value={message.priority} onChange={(event) => onPriorityChange(event.target.value as Priority)} className="rounded-lg border border-[#dedbd4] bg-white px-3 py-2 text-sm text-[#302f2a]">
-            <option value="urgent">Urgent</option><option value="fyi">FYI</option><option value="low">Low Priority</option>
-          </select>
-        </label>}
-        <div className="mt-8 flex items-start gap-4 border-b border-[#eceae5] pb-6">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#5944d8] text-sm font-extrabold text-white">{initials(sender)}</span>
-          <div className="min-w-0 flex-1"><p className="font-bold text-[#302f2a]">{sender}</p><p className="mt-1 break-all text-sm text-[#87837a]">{message.from}</p></div>
-          <time className="shrink-0 pt-1 text-xs text-[#8f8b82] md:text-sm">{fullTime}</time>
-        </div>
-        <div className="mx-auto mt-8 max-w-[900px] overflow-hidden rounded-xl bg-white"><EmailBody html={message.html} /></div>
-        {visibleAttachments.length > 0 && <section className="mx-auto mt-8 max-w-[900px] border-t border-[#eceae5] pt-6">
-          <h2 className="flex items-center gap-2 text-base font-bold text-[#302f2a]"><Icon name="paperclip" />Attachments ({visibleAttachments.length})</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {visibleAttachments.map((attachment) => <div key={attachment.partId} className="flex min-w-0 items-center gap-3 rounded-xl border border-[#e5e2dc] bg-[#faf9f6] p-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-[#5944d8]"><Icon name="paperclip" /></span>
-              <span className="min-w-0 flex-1"><strong className="block truncate text-sm">{attachment.filename}</strong><small className="mt-1 block text-xs text-[#8b877f]">{attachment.mimeType} · {formatBytes(attachment.size)}</small></span>
-              <span className="flex shrink-0 gap-1">
-                {/^(image\/|application\/pdf$)/i.test(attachment.mimeType) && <a href={attachment.previewUrl} target="_blank" rel="noreferrer" className="rounded-lg px-2 py-2 text-xs font-bold text-[#5944d8] hover:bg-[#eeecfb]">Preview</a>}
-                <a href={attachment.downloadUrl} aria-label={`Download ${attachment.filename}`} className="rounded-lg p-2 text-[#5f5c55] hover:bg-[#eeecfb]"><Icon name="download" /></a>
-              </span>
-            </div>)}
-          </div>
-        </section>}
-        {sendStatus && <p className={`mx-auto mt-6 max-w-[900px] rounded-lg px-4 py-3 text-sm ${sendStatus.endsWith("sent.") || sendStatus.endsWith("forwarded.") ? "bg-[#e8f1ee] text-[#416c60]" : "bg-[#fce9e9] text-[#a82f35]"}`}>{sendStatus}</p>}
-        {composeMode && <section className="mx-auto mt-8 max-w-[900px] rounded-2xl border border-[#dedbd4] bg-[#faf9f6] p-5 shadow-sm">
-          <div className="flex items-center justify-between"><h2 className="text-base font-bold">{composeMode === "reply" ? `Reply to ${sender}` : "Forward message"}</h2><button type="button" onClick={() => setComposeMode(null)} className="rounded-lg px-3 py-1 text-sm text-[#77736b] hover:bg-black/5">Cancel</button></div>
-          {composeMode === "forward" && <label className="mt-4 block text-sm font-semibold">To<input value={recipient} onChange={(event) => setRecipient(event.target.value)} type="email" placeholder="recipient@example.com" className="mt-2 block w-full rounded-lg border border-[#dedbd4] bg-white px-3 py-2 font-normal outline-none focus:border-[#5944d8]" /></label>}
-          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder={composeMode === "reply" ? "Write a reply…" : "Add a message…"} rows={7} className="mt-4 block w-full resize-y rounded-lg border border-[#dedbd4] bg-white p-3 text-sm outline-none focus:border-[#5944d8]" />
-          <div className="mt-4 flex justify-end"><button type="button" onClick={() => void sendMessage()} disabled={sending || !body.trim() || (composeMode === "forward" && !recipient.trim())} className="rounded-lg bg-[#5944d8] px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{sending ? "Sending…" : "Send"}</button></div>
-        </section>}
-      </article>
-    </section>
-  );
-}
-
 export function MailClient({ initialConnected, loginError }: { initialConnected: boolean; loginError?: string }) {
   const [messages, setMessages] = useState<Mail[]>([]);
   const [connected, setConnected] = useState(initialConnected);
@@ -222,6 +93,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [allPageTokens, setAllPageTokens] = useState([""]);
   const [allPageIndex, setAllPageIndex] = useState(0);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [resultSizeEstimate, setResultSizeEstimate] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
 
@@ -261,6 +133,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       }
       if (targetView !== "briefing") {
         setNextPageToken(data.nextPageToken ?? null);
+        setResultSizeEstimate(data.resultSizeEstimate ?? 0);
       }
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === "AbortError") return;
@@ -440,6 +313,29 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       setDeleting(false);
     }
   };
+  // Gmail-style single-message actions: apply, drop from the list when the
+  // message no longer belongs to the current view, and go back to the list.
+  const applyMessageAction = async (action: "unread" | "archive" | "spam") => {
+    if (!selectedMail) return;
+    const target = selectedMail;
+    setError(null);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(target.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!response.ok) throw new Error("The action could not be completed.");
+      setMessages((current) => action === "unread"
+        ? current.map((message) => message.id === target.id ? { ...message, unread: true } : message)
+        : action === "archive" && view === "all"
+          ? current
+          : current.filter((message) => message.id !== target.id));
+      setSelectedMail(null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "The action could not be completed.");
+    }
+  };
   const moveSelectedMailsToTrash = async () => {
     if (selectedIds.size === 0 || bulkDeleting || view === "trash") return;
     const ids = [...selectedIds];
@@ -487,6 +383,11 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     }
   };
 
+  const selectedPosition = {
+    index: selectedMail ? messages.findIndex((message) => message.id === selectedMail.id) : -1,
+    offset: view === "briefing" ? 0 : allPageIndex * 50,
+  };
+
   if (!connected) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f7f7f4] p-6">
@@ -525,10 +426,18 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           <MailDetail
             key={selectedMail.id}
             message={selectedMail}
+            myEmail={profile.email}
             deleting={deleting}
             error={error}
+            position={selectedPosition.index >= 0 ? selectedPosition.offset + selectedPosition.index + 1 : 0}
+            total={view === "briefing" ? messages.length : Math.max(resultSizeEstimate, selectedPosition.offset + messages.length)}
             onBack={() => setSelectedMail(null)}
+            onNewer={selectedPosition.index > 0 ? () => openMessage(messages[selectedPosition.index - 1]) : undefined}
+            onOlder={selectedPosition.index >= 0 && selectedPosition.index < messages.length - 1 ? () => openMessage(messages[selectedPosition.index + 1]) : undefined}
             onDelete={view === "trash" ? undefined : () => void moveSelectedMailToTrash()}
+            onArchive={view === "trash" || selectedMail.draft ? undefined : () => void applyMessageAction("archive")}
+            onSpam={view === "trash" || selectedMail.draft ? undefined : () => void applyMessageAction("spam")}
+            onMarkUnread={selectedMail.draft ? undefined : () => void applyMessageAction("unread")}
             onPriorityChange={(priority) => void changePriority(priority)}
             onStar={() => void toggleStar(selectedMail)}
           />
@@ -559,7 +468,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
                   {startsGroup && view !== "all" && view !== "drafts" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
-                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
+                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="shrink-0 text-[#77736b]"><Icon name="paperclip" className="h-4 w-4" /></span>}{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
                   </div>
                 </article>;
               })}

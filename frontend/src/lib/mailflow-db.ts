@@ -99,3 +99,46 @@ export async function recordPriority(input: {
     ]);
   });
 }
+
+export type StoredReplyDraft = {
+  draft: string;
+  model: string;
+  generatedAt: string;
+};
+
+export async function getStoredReplyDraft(input: {
+  userId: number;
+  gmailMessageId: string;
+  tone: string;
+  length: string;
+  instructions: string;
+}): Promise<StoredReplyDraft | null> {
+  const result = await query<{ draft: string; model: string; generated_at: Date }>(`
+    UPDATE reply_drafts
+    SET last_seen_at = NOW()
+    WHERE user_id = $1 AND gmail_message_id = $2 AND tone = $3 AND length = $4 AND instructions = $5
+    RETURNING draft, model, generated_at
+  `, [input.userId, input.gmailMessageId, input.tone, input.length, input.instructions]);
+  const row = result.rows[0];
+  return row ? { draft: row.draft, model: row.model, generatedAt: row.generated_at.toISOString() } : null;
+}
+
+export async function saveReplyDraft(input: {
+  userId: number;
+  gmailMessageId: string;
+  tone: string;
+  length: string;
+  instructions: string;
+  draft: string;
+  model: string;
+}) {
+  await query(`
+    INSERT INTO reply_drafts (user_id, gmail_message_id, tone, length, instructions, draft, model, generated_at, last_seen_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+    ON CONFLICT (user_id, gmail_message_id, tone, length, instructions) DO UPDATE SET
+      draft = EXCLUDED.draft,
+      model = EXCLUDED.model,
+      generated_at = NOW(),
+      last_seen_at = NOW()
+  `, [input.userId, input.gmailMessageId, input.tone, input.length, input.instructions, input.draft, input.model]);
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "signoff-urgent",
+    "subject": "Need your sign-off before 2pm today",
+    "from": "Jason Park <jason.park@company.com>",
+    "to": "\"Alex Kim\" <alex@gmail.com>",
+    "date": "Fri, 7 Nov 2026 08:12:00 +0900",
+    "body": "Hi Alex,\n\nSorry for the short notice — legal just sent back the final version of the vendor contract with Meridian Supply, and we need someone with signing authority to approve it before 2:00 PM today so we don't lose the negotiated rate.\n\nI've attached the redlined PDF. The only changes from the last version are in section 4 (payment terms) and section 7 (liability cap), both of which legal has already cleared.\n\nCan you take a quick look and send a reply confirming you're good to sign? Happy to hop on a call if anything's unclear.\n\nThanks,\nJason",
+    "instructions": "approve, I reviewed sections 4 and 7"
+  },
+  {
+    "id": "meeting-reschedule",
+    "subject": "Sync next Tuesday?",
+    "from": "Prof. Rameau <rameau@sunykorea.ac.kr>",
+    "to": "Donghyun Lim <atdt.skb@gmail.com>",
+    "date": "Thu, 6 Nov 2026 17:30:00 +0900",
+    "body": "Hi Donghyun,\n\nCould you join a short sync about your project progress next Tuesday at 2pm? Please also send me the latest slides beforehand.\n\nBest,\nF. Rameau",
+    "instructions": "2pm doesn't work, propose 3pm or Wednesday; slides will be sent Monday"
+  },
+  {
+    "id": "korean-formal",
+    "subject": "[CSE416] 팀 프로젝트 중간 발표 일정 안내",
+    "from": "김지수 조교 <ta.kim@sunykorea.ac.kr>",
+    "to": "임동현 <atdt.skb@gmail.com>",
+    "date": "Wed, 5 Nov 2026 10:05:00 +0900",
+    "body": "임동현 학생 안녕하세요,\n\nCSE416 팀 프로젝트 중간 발표가 11월 20일(목) 오후 2시로 확정되었습니다. 발표 시간은 팀당 10분이며, 발표 자료는 11월 18일까지 제출해 주시기 바랍니다.\n\n발표 순서에 대한 선호가 있으시면 이번 주 금요일까지 회신 부탁드립니다.\n\n감사합니다.\n김지수 드림",
+    "instructions": "확인했고, 발표 순서는 뒤쪽을 선호한다고 전달"
+  },
+  {
+    "id": "korean-casual",
+    "subject": "이번 주말 모임",
+    "from": "승훈 <seunghoon@gmail.com>",
+    "to": "atdt.skb@gmail.com",
+    "date": "Fri, 7 Nov 2026 21:40:00 +0900",
+    "body": "동현아 토요일 저녁에 팀원들끼리 밥 한번 먹자는데 시간 돼? 장소는 홍대 쪽 생각 중. 안 되면 일요일도 가능!",
+    "instructions": ""
+  },
+  {
+    "id": "html-newsletter-reply",
+    "subject": "Quick question about your talk",
+    "from": "Maria Lopez <maria.lopez@startup.io>",
+    "to": "Alex Kim <alex@gmail.com>",
+    "date": "Tue, 4 Nov 2026 14:00:00 +0900",
+    "body": "<html><body><p>Hi Alex,</p><p>I attended your talk on <b>accessible video players</b> last week and loved it. Two quick questions:</p><ol><li>Is the audio-description pipeline open source?</li><li>Would you be open to a 30-minute chat about collaborating?</li></ol><p>Thanks!<br>Maria</p></body></html>",
+    "instructions": ""
+  },
+  {
+    "id": "no-instructions-decision",
+    "subject": "Budget approval for Q1 conference travel",
+    "from": "Finance Team <finance@company.com>",
+    "to": "Alex Kim <alex@gmail.com>",
+    "date": "Mon, 3 Nov 2026 09:00:00 +0900",
+    "body": "Hi Alex,\n\nWe need your decision on the Q1 conference travel budget: Option A ($12,000, two attendees) or Option B ($7,500, one attendee). Please reply with your choice by Friday.\n\nRegards,\nFinance",
+    "instructions": ""
+  },
+  {
+    "id": "long-thread",
+    "subject": "Re: Re: API rate limiting design",
+    "from": "Dev Patel <dev.patel@company.com>",
+    "to": "Alex Kim <alex@gmail.com>, Sam Lee <sam@company.com>",
+    "date": "Fri, 7 Nov 2026 11:20:00 +0900",
+    "body": "Hey Alex,\n\nFollowing up on the thread below. I think token bucket per API key is the way to go, but Sam raised a fair point about burst traffic from the mobile app. Three things I need from you:\n\n1. Do you agree with token bucket over sliding window?\n2. What burst size should we allow for mobile clients?\n3. Can you review my PR (#482) by Monday?\n\nThanks,\nDev\n\n> On Thu, Nov 6, Sam Lee wrote:\n> Token bucket is fine but mobile clients retry aggressively on reconnect...\n>> On Wed, Nov 5, Alex Kim wrote:\n>> Let's decide on the algorithm this week.",
+    "instructions": "agree with token bucket, burst of 50 for mobile, will review PR Monday morning"
+  }
+]

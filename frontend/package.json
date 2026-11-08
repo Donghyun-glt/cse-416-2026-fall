@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "node --test tests/*.test.cjs",
     "db:migrate": "node scripts/migrate-db.mjs",
-    "db:inspect": "node scripts/inspect-db.mjs"
+    "db:inspect": "node scripts/inspect-db.mjs",
+    "ai:try": "node scripts/try-reply-draft.mjs"
   },
   "dependencies": {
     "googleapis": "^181.0.0",

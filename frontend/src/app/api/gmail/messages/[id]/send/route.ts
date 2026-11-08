@@ -119,12 +119,12 @@ export async function POST(
   if (!tokens) return Response.json({ connected: false }, { status: 401 });
 
   const input = await request.json().catch(() => ({})) as {
-    action?: "reply" | "forward";
+    action?: "reply" | "replyAll" | "forward";
     to?: string;
     body?: string;
   };
   const body = input.body?.trim() ?? "";
-  if (!body || (input.action !== "reply" && input.action !== "forward")) {
+  if (!body || (input.action !== "reply" && input.action !== "replyAll" && input.action !== "forward")) {
     return Response.json({ error: "invalid_message" }, { status: 400 });
   }
 
@@ -142,11 +142,20 @@ export async function POST(
     const references = cleanHeader(originalHeaders.get("references") ?? "");
     const originalText = plainBody(original.data.payload) ?? original.data.snippet ?? "";
 
-    if (input.action === "reply") {
+    if (input.action === "reply" || input.action === "replyAll") {
       const to = emailAddress(originalHeaders.get("reply-to") || from);
       if (!to) return Response.json({ error: "reply_address_missing" }, { status: 400 });
+      let cc = "";
+      if (input.action === "replyAll") {
+        const me = ((await gmail.users.getProfile({ userId: "me" })).data.emailAddress ?? "").toLowerCase();
+        const others = forwardAddresses(`${originalHeaders.get("to") ?? ""},${originalHeaders.get("cc") ?? ""}`)
+          .split(", ")
+          .filter((address) => address && address.toLowerCase() !== me && address.toLowerCase() !== to.toLowerCase());
+        cc = [...new Set(others)].join(", ");
+      }
       const raw = rawMessage({
         To: to,
+        Cc: cc,
         Subject: encodedHeader(prefixedSubject(subject, "Re:")),
         "In-Reply-To": messageId,
         References: cleanHeader(`${references} ${messageId}`),

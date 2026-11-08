@@ -24,7 +24,7 @@ function findBodyByMimeType(
 ): string | null {
   if (!part) return null;
 
-  if (part.mimeType === mimeType && part.body?.data) {
+  if (part.mimeType === mimeType && part.body?.data && !isAttachmentPart(part)) {
     return decodeBase64Url(part.body.data);
   }
 
@@ -34,6 +34,11 @@ function findBodyByMimeType(
   }
 
   return null;
+}
+
+function isAttachmentPart(part: gmail_v1.Schema$MessagePart) {
+  const disposition = (partHeaders(part).get("content-disposition") ?? "").toLowerCase();
+  return Boolean(part.filename) || disposition.startsWith("attachment");
 }
 
 function partHeaders(part: gmail_v1.Schema$MessagePart) {
@@ -53,6 +58,7 @@ function attachmentPath(messageId: string, partId: string, download = false) {
 function collectAttachments(
   messageId: string,
   part: gmail_v1.Schema$MessagePart | undefined,
+  referencedContentIds: Set<string>,
   attachments: GmailAttachment[] = [],
   contentIds = new Map<string, GmailAttachment>(),
 ) {
@@ -60,7 +66,6 @@ function collectAttachments(
 
   const headers = partHeaders(part);
   const contentId = (headers.get("content-id") ?? "").trim().replace(/^<|>$/g, "").toLowerCase();
-  const disposition = (headers.get("content-disposition") ?? "").toLowerCase();
   const hasFileBody = Boolean(part.body?.attachmentId || (part.body?.data && part.filename));
 
   if (part.partId && hasFileBody) {
@@ -70,7 +75,10 @@ function collectAttachments(
       filename,
       mimeType: part.mimeType || "application/octet-stream",
       size: part.body?.size ?? 0,
-      inline: disposition.startsWith("inline") || Boolean(contentId),
+      // Gmail only hides a part from the attachment list when the HTML body
+      // really embeds it via cid:. Outlook/Exchange put a Content-ID (and often
+      // "inline") on ordinary PDFs too, which previously hid them entirely.
+      inline: Boolean(contentId) && referencedContentIds.has(contentId),
       previewUrl: attachmentPath(messageId, part.partId),
       downloadUrl: attachmentPath(messageId, part.partId, true),
     };
@@ -79,21 +87,33 @@ function collectAttachments(
   }
 
   for (const child of part.parts ?? []) {
-    collectAttachments(messageId, child, attachments, contentIds);
+    collectAttachments(messageId, child, referencedContentIds, attachments, contentIds);
   }
   return { attachments, contentIds };
+}
+
+function normalizeContentId(rawContentId: string) {
+  let contentId = rawContentId.trim().replace(/^<|>$/g, "").toLowerCase();
+  try {
+    contentId = decodeURIComponent(contentId);
+  } catch {
+    // Keep the original Content-ID when it is not URL encoded.
+  }
+  return contentId;
+}
+
+function referencedContentIdsOf(html: string | null) {
+  const ids = new Set<string>();
+  if (!html) return ids;
+  for (const match of html.matchAll(/cid:([^"'\s)>]+)/gi)) ids.add(normalizeContentId(match[1]));
+  return ids;
 }
 
 function restoreInlineImages(html: string, contentIds: Map<string, GmailAttachment>) {
   return html.replace(
     /\bsrc\s*=\s*(["'])cid:([^"']+)\1/gi,
     (match, quote: string, rawContentId: string) => {
-      let contentId = rawContentId.trim().replace(/^<|>$/g, "").toLowerCase();
-      try {
-        contentId = decodeURIComponent(contentId);
-      } catch {
-        // Keep the original Content-ID when it is not URL encoded.
-      }
+      const contentId = normalizeContentId(rawContentId);
       const attachment = contentIds.get(contentId);
       return attachment ? `src=${quote}${attachment.previewUrl}${quote}` : match;
     },
@@ -233,6 +253,15 @@ function buildEmailDocument(bodyHtml: string) {
 </html>`;
 }
 
+// Gmail shows an "Unsubscribe" link next to the sender for bulk mail. Prefer
+// the https target from List-Unsubscribe, falling back to its mailto: target.
+function unsubscribeUrl(header: string) {
+  const targets = [...header.matchAll(/<([^>]+)>/g)].map((match) => match[1].trim());
+  return targets.find((target) => /^https:\/\//i.test(target))
+    ?? targets.find((target) => /^mailto:/i.test(target))
+    ?? "";
+}
+
 export function parseGmailMessage(message: gmail_v1.Schema$Message) {
   const headers = new Map(
     (message.payload?.headers ?? []).map((header) => [
@@ -246,7 +275,11 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
   // gets wrapped so every message renders through the same path.
   const htmlBody = findBodyByMimeType(message.payload, "text/html");
   const plainBody = findBodyByMimeType(message.payload, "text/plain");
-  const { attachments, contentIds } = collectAttachments(message.id ?? "", message.payload);
+  const { attachments, contentIds } = collectAttachments(
+    message.id ?? "",
+    message.payload,
+    referencedContentIdsOf(htmlBody),
+  );
 
   const content = htmlBody
     ? restoreInlineImages(sanitizeEmailHtml(htmlBody), contentIds).slice(0, MAX_HTML_LENGTH)
@@ -260,6 +293,9 @@ export function parseGmailMessage(message: gmail_v1.Schema$Message) {
     subject: headers.get("subject") || "(제목 없음)",
     from: headers.get("from") || "알 수 없는 발신자",
     date: headers.get("date") || "",
+    to: headers.get("to") || "",
+    cc: headers.get("cc") || "",
+    unsubscribeUrl: unsubscribeUrl(headers.get("list-unsubscribe") ?? ""),
     snippet: message.snippet ?? "",
     unread: message.labelIds?.includes("UNREAD") ?? false,
     starred: message.labelIds?.includes("STARRED") ?? false,

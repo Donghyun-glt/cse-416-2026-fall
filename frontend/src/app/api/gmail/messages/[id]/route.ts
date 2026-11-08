@@ -26,7 +26,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({})) as {
-      action?: "read" | "star" | "restore" | "priority";
+      action?: "read" | "unread" | "star" | "restore" | "priority" | "archive" | "spam";
       starred?: boolean;
       priority?: unknown;
     };
@@ -42,6 +42,15 @@ export async function PATCH(
     if (body.action === "restore") {
       await gmail.users.messages.untrash({ userId: "me", id });
       return NextResponse.json({ restored: true });
+    }
+    if (body.action === "unread" || body.action === "archive" || body.action === "spam") {
+      const requestBody = body.action === "unread"
+        ? { addLabelIds: ["UNREAD"] }
+        : body.action === "archive"
+          ? { removeLabelIds: ["INBOX"] }
+          : { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] };
+      await gmail.users.messages.modify({ userId: "me", id, requestBody });
+      return NextResponse.json({ ok: true, action: body.action });
     }
     const isStarAction = body.action === "star";
     await gmail.users.messages.modify({
