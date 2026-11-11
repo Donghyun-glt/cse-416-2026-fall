@@ -81,35 +81,90 @@ function attachmentParts(part: gmail_v1.Schema$MessagePart | undefined, result: 
   return result;
 }
 
-function rawMessage(headers: Record<string, string>, body: string, attachments: OutgoingAttachment[] = []) {
+// Vercel caps request bodies at 4.5 MB, and Gmail's simple send endpoint has a
+// similar ceiling, so new attachments are limited to 4 MB in total.
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char] ?? char));
+}
+
+function textToHtml(value: string) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br>");
+}
+
+/**
+ * The composer only produces simple formatting (fonts, sizes, bold, lists).
+ * Anything that could run code or load remote content is removed before the
+ * HTML is put into an outgoing message.
+ */
+function sanitizeComposedHtml(value: string) {
+  return value
+    .slice(0, 200_000)
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style|iframe|object|embed|svg|math|form|template|noscript)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<\/?(?:script|style|iframe|object|embed|svg|math|form|template|noscript|link|meta|base|input|button|textarea|select|img|video|audio|source)\b[^>]*>/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s+(?:href|src|action|formaction|xlink:href)\s*=\s*(?:"\s*(?:javascript|data|vbscript):[^"]*"|'\s*(?:javascript|data|vbscript):[^']*'|(?:javascript|data|vbscript):[^\s>]+)/gi, "")
+    // Inside style attributes only, so ordinary text that mentions url( is untouched.
+    .replace(/(\sstyle\s*=\s*)("[^"]*"|'[^']*')/gi, (_match, prefix: string, styles: string) => `${prefix}${styles.replace(/expression\s*\(|url\s*\(|@import/gi, "")}`);
+}
+
+type MimePart = { headers: string[]; body: string };
+
+function mimeBoundary() {
+  return `mailflow_${randomBytes(16).toString("hex")}`;
+}
+
+function multipart(subtype: "alternative" | "mixed", parts: MimePart[]): MimePart {
+  const boundary = mimeBoundary();
+  const lines: string[] = [];
+  for (const part of parts) lines.push(`--${boundary}`, ...part.headers, "", part.body);
+  lines.push(`--${boundary}--`);
+  return { headers: [`Content-Type: multipart/${subtype}; boundary="${boundary}"`], body: lines.join("\r\n") };
+}
+
+function textPart(subtype: "plain" | "html", value: string): MimePart {
+  return { headers: [`Content-Type: text/${subtype}; charset=UTF-8`, "Content-Transfer-Encoding: base64"], body: base64Lines(value) };
+}
+
+function attachmentPart(attachment: OutgoingAttachment): MimePart {
+  const filename = cleanHeader(attachment.filename).replace(/["\\]/g, "_") || "attachment";
+  const encodedFilename = encodeURIComponent(filename);
+  const mimeType = /^[\w.+-]+\/[\w.+-]+$/.test(attachment.mimeType) ? attachment.mimeType : "application/octet-stream";
+  return {
+    headers: [
+      `Content-Type: ${mimeType}; name*=UTF-8''${encodedFilename}`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename*=UTF-8''${encodedFilename}`,
+    ],
+    body: base64Lines(attachment.data),
+  };
+}
+
+/**
+ * Builds the message the way Gmail does: a plain-text and an HTML version of
+ * the body (multipart/alternative) when there is formatting, wrapped in
+ * multipart/mixed when there are attachments.
+ */
+function rawMessage(headers: Record<string, string>, content: { text: string; html?: string }, attachments: OutgoingAttachment[] = []) {
+  const bodyPart = content.html
+    ? multipart("alternative", [textPart("plain", content.text), textPart("html", content.html)])
+    : textPart("plain", content.text);
+  const root = attachments.length > 0 ? multipart("mixed", [bodyPart, ...attachments.map(attachmentPart)]) : bodyPart;
   const lines = Object.entries(headers)
     .filter(([, value]) => Boolean(value))
     .map(([name, value]) => `${name}: ${value}`);
-  lines.push("MIME-Version: 1.0");
-
-  if (attachments.length === 0) {
-    lines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", base64Lines(body));
-  } else {
-    const boundary = `mailflow_${randomBytes(16).toString("hex")}`;
-    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, "", `--${boundary}`);
-    lines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", base64Lines(body));
-    for (const attachment of attachments) {
-      const filename = cleanHeader(attachment.filename).replace(/["\\]/g, "_") || "attachment";
-      const encodedFilename = encodeURIComponent(filename);
-      lines.push(
-        `--${boundary}`,
-        `Content-Type: ${attachment.mimeType || "application/octet-stream"}; name*=UTF-8''${encodedFilename}`,
-        "Content-Transfer-Encoding: base64",
-        `Content-Disposition: attachment; filename*=UTF-8''${encodedFilename}`,
-        "",
-        base64Lines(attachment.data),
-      );
-    }
-    lines.push(`--${boundary}--`);
-  }
+  lines.push("MIME-Version: 1.0", ...root.headers, "", root.body);
   return Buffer.from(lines.join("\r\n"), "utf8").toString("base64url");
 }
 
+/**
+ * POST /api/gmail/messages/[id]/send
+ * JSON body: { action, body, to? } sends plain text.
+ * multipart/form-data: action, body (plain text), html? (formatted version),
+ * to?, files* (new attachments, 4 MB total) sends formatted mail with files.
+ */
 export async function POST(
   request: NextRequest,
   { params }: RouteContext<"/api/gmail/messages/[id]/send">,
@@ -118,12 +173,27 @@ export async function POST(
   const tokens = sessionId ? await getGmailSession(sessionId) : undefined;
   if (!tokens) return Response.json({ connected: false }, { status: 401 });
 
-  const input = await request.json().catch(() => ({})) as {
-    action?: "reply" | "replyAll" | "forward";
-    to?: string;
-    body?: string;
-  };
-  const body = input.body?.trim() ?? "";
+  const input: { action?: string; to?: string; body?: string; html?: string } = {};
+  const uploads: OutgoingAttachment[] = [];
+  if ((request.headers.get("content-type") ?? "").includes("multipart/form-data")) {
+    const form = await request.formData().catch(() => null);
+    if (!form) return Response.json({ error: "invalid_message" }, { status: 400 });
+    for (const key of ["action", "to", "body", "html"] as const) {
+      const value = form.get(key);
+      if (typeof value === "string") input[key] = value;
+    }
+    let totalBytes = 0;
+    for (const entry of form.getAll("files")) {
+      if (typeof entry === "string") continue;
+      totalBytes += entry.size;
+      if (totalBytes > MAX_ATTACHMENT_BYTES) return Response.json({ error: "attachments_too_large" }, { status: 413 });
+      uploads.push({ filename: entry.name || "attachment", mimeType: entry.type || "application/octet-stream", data: Buffer.from(await entry.arrayBuffer()) });
+    }
+  } else {
+    Object.assign(input, await request.json().catch(() => ({})));
+  }
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  const composedHtml = typeof input.html === "string" && input.html.trim() ? sanitizeComposedHtml(input.html) : "";
   if (!body || (input.action !== "reply" && input.action !== "replyAll" && input.action !== "forward")) {
     return Response.json({ error: "invalid_message" }, { status: 400 });
   }
@@ -159,7 +229,12 @@ export async function POST(
         Subject: encodedHeader(prefixedSubject(subject, "Re:")),
         "In-Reply-To": messageId,
         References: cleanHeader(`${references} ${messageId}`),
-      }, `${body}\r\n\r\nOn ${date}, ${cleanHeader(from)} wrote:\r\n${quote(originalText)}`);
+      }, {
+        text: `${body}\r\n\r\nOn ${date}, ${cleanHeader(from)} wrote:\r\n${quote(originalText)}`,
+        html: composedHtml
+          ? `<div dir="ltr">${composedHtml}</div><br><div class="gmail_quote"><div dir="ltr">On ${escapeHtml(date)}, ${escapeHtml(cleanHeader(from))} wrote:<br></div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${textToHtml(originalText)}</blockquote></div>`
+          : undefined,
+      }, uploads);
       await gmail.users.messages.send({
         userId: "me",
         requestBody: { raw, threadId: original.data.threadId ?? undefined },
@@ -184,7 +259,12 @@ export async function POST(
       const raw = rawMessage({
         To: to,
         Subject: encodedHeader(prefixedSubject(subject, "Fwd:")),
-      }, `${body}\r\n\r\n---------- Forwarded message ---------\r\nFrom: ${cleanHeader(from)}\r\nDate: ${cleanHeader(date)}\r\nSubject: ${cleanHeader(subject)}\r\n\r\n${originalText}`, attachments);
+      }, {
+        text: `${body}\r\n\r\n---------- Forwarded message ---------\r\nFrom: ${cleanHeader(from)}\r\nDate: ${cleanHeader(date)}\r\nSubject: ${cleanHeader(subject)}\r\n\r\n${originalText}`,
+        html: composedHtml
+          ? `<div dir="ltr">${composedHtml}</div><br><div class="gmail_quote"><div dir="ltr">---------- Forwarded message ---------<br>From: ${escapeHtml(cleanHeader(from))}<br>Date: ${escapeHtml(cleanHeader(date))}<br>Subject: ${escapeHtml(cleanHeader(subject))}<br><br></div>${textToHtml(originalText)}</div>`
+          : undefined,
+      }, [...attachments, ...uploads]);
       await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
     }
 

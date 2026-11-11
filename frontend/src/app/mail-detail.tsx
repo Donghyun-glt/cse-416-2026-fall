@@ -26,6 +26,24 @@ export type Mail = {
 
 type ComposeMode = "reply" | "replyAll" | "forward";
 
+// Same font and size choices as Gmail's compose toolbar.
+const COMPOSER_FONTS = [
+  ["Sans Serif", "Arial, Helvetica, sans-serif"],
+  ["Serif", "'Times New Roman', serif"],
+  ["Fixed Width", "'Courier New', monospace"],
+  ["Wide", "'Arial Black', sans-serif"],
+  ["Narrow", "'Arial Narrow', sans-serif"],
+  ["Comic Sans MS", "'Comic Sans MS', sans-serif"],
+  ["Garamond", "Garamond, serif"],
+  ["Georgia", "Georgia, serif"],
+  ["Tahoma", "Tahoma, sans-serif"],
+  ["Trebuchet MS", "'Trebuchet MS', sans-serif"],
+  ["Verdana", "Verdana, sans-serif"],
+] as const;
+const COMPOSER_SIZES = [["Small", "2"], ["Normal", "3"], ["Large", "5"], ["Huge", "6"]] as const;
+// Keep in sync with MAX_ATTACHMENT_BYTES in the send route.
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
 // Slider stops for the AI panel (left -> right).
 const TONE_STOPS: ReplyTone[] = ["friendly", "professional", "formal"];
 const LENGTH_STOPS: ReplyLength[] = ["short", "medium", "long"];
@@ -160,6 +178,12 @@ const ICONS = {
   attach: "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z",
   download: "M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zm-1-4l-1.41-1.41L13 12.17V4h-2v8.17L8.41 9.59 7 11l5 5 5-5z",
   dropDown: "M7 10l5 5 5-5z",
+  bold: "M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z",
+  italic: "M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z",
+  underline: "M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z",
+  listBulleted: "M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z",
+  listNumbered: "M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z",
+  formatClear: "M3.27 5L2 6.27l6.97 6.97L6.5 19h3l1.57-3.66L16.73 21 18 19.73 3.55 5.27 3.27 5zM6 5v.18L8.82 8h2.4l-.72 1.68 2.1 2.1L14.21 8H20V5H6z",
   close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
   file: "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z",
   image: "M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z",
@@ -404,7 +428,16 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const closeMore = useCallback(() => setMoreOpen(false), []);
   const detailsRef = useDismiss(detailsOpen, closeDetails);
   const moreRef = useDismiss(moreOpen, closeMore);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [fontFamily, setFontFamily] = useState<string>(COMPOSER_FONTS[0][1]);
+  const [fontSize, setFontSize] = useState<string>("3");
+  const [modeOpen, setModeOpen] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const closeMode = useCallback(() => setModeOpen(false), []);
+  const modeRef = useDismiss(modeOpen, closeMode);
 
   useEffect(() => {
     if (!toast) return;
@@ -416,12 +449,77 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setComposeMode(mode);
     setForwardTo("");
     setBody("");
+    setFiles([]);
+    setFontFamily(COMPOSER_FONTS[0][1]);
+    setFontSize("3");
+    savedRangeRef.current = null;
+    if (composerRef.current) composerRef.current.innerHTML = "";
     setComposeError(null);
     setMoreOpen(false);
+    setModeOpen(false);
+    setQuoteOpen(false);
     window.setTimeout(() => {
       composerRef.current?.focus();
       composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 0);
+  };
+
+  // Switch between reply / reply all / forward without losing what was typed.
+  const switchComposeMode = (mode: ComposeMode) => {
+    setComposeMode(mode);
+    setModeOpen(false);
+    setComposeError(null);
+    window.setTimeout(() => composerRef.current?.focus(), 0);
+  };
+
+  // ----- Rich-text composer (a contentEditable area, like Gmail's) -----
+  // Toolbar controls take focus away from the editor, so the caret/selection
+  // is remembered and put back before a formatting command runs.
+  const rememberSelection = () => {
+    const selection = window.getSelection();
+    const editor = composerRef.current;
+    if (!selection || selection.rangeCount === 0 || !editor) return;
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) savedRangeRef.current = range.cloneRange();
+  };
+  const syncComposer = () => {
+    const editor = composerRef.current;
+    if (!editor) return;
+    const text = editor.innerText.replace(/\u00a0/g, " ");
+    // Browsers leave a stray <br> behind after everything is deleted; clear it
+    // so the placeholder comes back.
+    if (!text.trim() && !editor.querySelector("li")) editor.innerHTML = "";
+    setBody(text);
+    rememberSelection();
+  };
+  const format = (command: string, value?: string) => {
+    const editor = composerRef.current;
+    if (!editor) return;
+    editor.focus();
+    const selection = window.getSelection();
+    if (selection && savedRangeRef.current) {
+      selection.removeAllRanges();
+      selection.addRange(savedRangeRef.current);
+    }
+    // execCommand is the same editing API browsers expose to every webmail composer.
+    document.execCommand("styleWithCSS", false, "true");
+    document.execCommand(command, false, value);
+    syncComposer();
+  };
+  const addFiles = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const next = [...files];
+    for (const file of Array.from(list)) {
+      if (!next.some((existing) => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified)) next.push(file);
+    }
+    const total = next.reduce((sum, file) => sum + file.size, 0);
+    if (total > MAX_ATTACHMENT_BYTES) {
+      setComposeError(`Attachments can be up to ${formatBytes(MAX_ATTACHMENT_BYTES)} in total. These files add up to ${formatBytes(total)}.`);
+    } else {
+      setComposeError(null);
+      setFiles(next);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
@@ -492,15 +590,20 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setSending(true);
     setComposeError(null);
     try {
-      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: composeMode, to: forwardTo, body }),
-      });
+      // Sent as form data so files travel as binary. The plain-text version is
+      // what clients without HTML support show; the HTML carries the formatting.
+      const form = new FormData();
+      form.set("action", composeMode);
+      form.set("to", forwardTo);
+      form.set("body", body);
+      form.set("html", composerRef.current?.innerHTML ?? "");
+      for (const file of files) form.append("files", file, file.name);
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, { method: "POST", body: form });
       const result = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Message could not be sent.");
+      if (!response.ok) throw new Error(response.status === 413 || result.error === "attachments_too_large" ? `Attachments can be up to ${formatBytes(MAX_ATTACHMENT_BYTES)} in total.` : result.error ?? "Message could not be sent.");
       setComposeMode(null);
       setBody("");
+      setFiles([]);
       setForwardTo("");
       setToast("Message sent");
     } catch (sendError) {
@@ -666,40 +769,125 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
           </div>
         )}
 
-        {/* ---------- Inline composer (replaces the bottom bar, like Gmail) ---------- */}
-        {composeMode && (
+        {/* ---------- Inline composer: always starts blank, independent of the AI suggestion ---------- */}
+        {composeMode && (() => {
+          const canSend = !sending && Boolean(body.trim()) && (composeMode !== "forward" || Boolean(forwardTo.trim()));
+          const modeLabel = composeMode === "forward" ? "Forward" : composeMode === "replyAll" ? "Reply all" : "Reply";
+          return (
           <div className="flex gap-3 px-4 pb-8 pt-6 sm:gap-4">
-            <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0b57d0] text-lg font-medium text-white sm:flex">{initials(myEmail || "Me").slice(0, 1)}</span>
-            <div className="min-w-0 flex-1 rounded-lg bg-white shadow-[0_1px_2px_rgba(60,64,67,.3),0_2px_6px_2px_rgba(60,64,67,.15)]">
-              <div className="flex min-h-11 items-center gap-2 border-b border-[#e0e0e0] px-3 text-sm">
-                <GIcon name={composeMode === "forward" ? "forward" : composeMode === "replyAll" ? "replyAll" : "reply"} className="h-5 w-5 shrink-0 text-[#444746]" />
+            <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#5b4bd6] text-lg font-medium text-white sm:flex">{initials(myEmail || "Me").slice(0, 1)}</span>
+            <div className="min-w-0 flex-1 rounded-2xl border border-[#e3e3e3] bg-white shadow-[0_1px_3px_rgba(60,64,67,.2),0_4px_10px_2px_rgba(60,64,67,.08)] transition focus-within:border-[#b9b1ee]">
+              {/* Header: what kind of message this is, and who gets it */}
+              <div className="flex min-h-12 items-start gap-1 px-2 pt-2 text-sm">
+                <div ref={modeRef} className="relative shrink-0">
+                  <button type="button" onClick={() => setModeOpen((open) => !open)} aria-haspopup="menu" aria-expanded={modeOpen} aria-label={`${modeLabel}. Change type of response`} title="Type of response"
+                    className="flex h-8 items-center rounded-full pl-2 pr-0.5 text-[#444746] hover:bg-[#1f1f1f14]">
+                    <GIcon name={composeMode === "forward" ? "forward" : composeMode === "replyAll" ? "replyAll" : "reply"} className="h-5 w-5" />
+                    <GIcon name="dropDown" className="h-5 w-5" />
+                  </button>
+                  {modeOpen && (
+                    <div role="menu" className="absolute left-0 top-9 z-30 w-44 rounded bg-white py-2 shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
+                      <MenuItem icon="reply" label="Reply" onClick={() => switchComposeMode("reply")} />
+                      {canReplyAll && <MenuItem icon="replyAll" label="Reply all" onClick={() => switchComposeMode("replyAll")} />}
+                      <MenuItem icon="forward" label="Forward" onClick={() => switchComposeMode("forward")} />
+                    </div>
+                  )}
+                </div>
                 {composeMode === "forward" ? (
-                  <input value={forwardTo} onChange={(event) => setForwardTo(event.target.value)} type="text" inputMode="email" placeholder="Recipients" aria-label="Recipients" autoFocus
-                    className="min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-[#5e5e5e]" />
+                  <label className="flex min-w-0 flex-1 items-center gap-2 pt-0.5">
+                    <span className="shrink-0 text-[#5e5e5e]">To</span>
+                    <input value={forwardTo} onChange={(event) => setForwardTo(event.target.value)} type="text" inputMode="email" placeholder="name@example.com, another@example.com" aria-label="Recipients" autoFocus
+                      className="min-w-0 flex-1 bg-transparent py-1 outline-none placeholder:text-[#9a9a9a]" />
+                  </label>
                 ) : (
-                  <span className="flex min-w-0 flex-1 flex-wrap gap-1 py-2">
-                    <span className="rounded-full bg-[#e9eef6] px-2 py-0.5 text-xs text-[#1f1f1f]">{sender}</span>
-                    {composeMode === "replyAll" && otherRecipients.map((recipient) => <span key={recipient} className="rounded-full bg-[#e9eef6] px-2 py-0.5 text-xs text-[#1f1f1f]">{formatSender(recipient)}</span>)}
+                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 pt-1.5">
+                    <span className="max-w-full truncate text-[#1f1f1f]">{sender}{address && address !== sender && <span className="text-[#5e5e5e]"> ({address})</span>}</span>
+                    {composeMode === "replyAll" && otherRecipients.map((recipient) => <span key={recipient} className="max-w-full truncate rounded-full bg-[#f0eefb] px-2 py-0.5 text-xs text-[#1f1f1f]">{formatSender(recipient)}</span>)}
                   </span>
                 )}
               </div>
-              <textarea ref={composerRef} value={body} onChange={(event) => setBody(event.target.value)} rows={6} aria-label="Message body"
-                className="block w-full resize-y bg-transparent px-4 py-3 text-sm leading-6 outline-none" />
+
+              <div ref={composerRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Message body"
+                data-placeholder={composeMode === "forward" ? "Add a message…" : "Write your reply…"}
+                onInput={syncComposer} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onBlur={rememberSelection}
+                onPaste={(event) => {
+                  // Paste as plain text so foreign styles and markup do not end up in the message.
+                  event.preventDefault();
+                  document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+                }}
+                onDrop={(event) => { if (event.dataTransfer.files.length > 0) { event.preventDefault(); addFiles(event.dataTransfer.files); } }}
+                onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canSend) { event.preventDefault(); void sendMessage(); } }}
+                style={{ fontFamily: COMPOSER_FONTS[0][1] }}
+                className="max-h-[50vh] min-h-[130px] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 outline-none empty:before:pointer-events-none empty:before:text-[#9a9a9a] empty:before:content-[attr(data-placeholder)] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6" />
+
+              {/* The original message is added below the text when it is sent */}
+              <div className="px-4 pb-2">
+                <button type="button" onClick={() => setQuoteOpen((open) => !open)} aria-expanded={quoteOpen} title={quoteOpen ? "Hide original message" : "Show original message"} aria-label={quoteOpen ? "Hide original message" : "Show original message"}
+                  className="flex h-4 items-center rounded-full bg-[#e9eef6] px-2 text-[#444746] hover:bg-[#d3dbe5]"><span aria-hidden="true" className="-mt-1.5 text-base font-bold leading-none tracking-wider">…</span></button>
+                {quoteOpen && (
+                  <div className="mt-2 border-l-2 border-[#d3d3d3] pl-3 text-xs leading-5 text-[#5e5e5e]">
+                    <p>{composeMode === "forward" ? "---------- Forwarded message ---------" : `On ${fullDate(message.date)}, ${sender} wrote:`}</p>
+                    <p className="mt-1 line-clamp-3">{message.snippet}</p>
+                    <p className="mt-1 text-[#9a9a9a]">The full original message is included when you send.</p>
+                  </div>
+                )}
+              </div>
+
               {composeMode === "forward" && visibleAttachments.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-4 pb-3">
                   {visibleAttachments.map((attachment) => <span key={attachment.partId} className="flex max-w-[240px] items-center gap-2 rounded bg-[#f2f2f2] px-2 py-1 text-xs"><FileBadge kind={fileKind(attachment)} className="h-4 w-4" /><span className="truncate font-medium text-[#0b57d0]">{attachment.filename}</span><span className="text-[#5e5e5e]">({formatBytes(attachment.size)})</span></span>)}
                 </div>
               )}
+              {/* New attachments */}
+              {files.length > 0 && (
+                <ul className="flex flex-wrap gap-2 px-4 pb-3" aria-label="Attachments">
+                  {files.map((file) => (
+                    <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex max-w-[280px] items-center gap-2 rounded bg-[#f2f2f2] py-1 pl-2 pr-1 text-xs">
+                      <GIcon name="attach" className="h-4 w-4 shrink-0 -rotate-45 text-[#5e5e5e]" />
+                      <span className="truncate font-medium text-[#0b57d0]">{file.name}</span>
+                      <span className="shrink-0 text-[#5e5e5e]">({formatBytes(file.size)})</span>
+                      <button type="button" onClick={() => setFiles((current) => current.filter((item) => item !== file))} aria-label={`Remove ${file.name}`} title="Remove" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#5e5e5e] hover:bg-[#1f1f1f14]"><GIcon name="close" className="h-3.5 w-3.5" /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {composeError && <p className="mx-4 mb-3 rounded bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{composeError}</p>}
-              <div className="flex items-center gap-2 px-4 pb-3">
-                <button type="button" onClick={() => void sendMessage()} disabled={sending || !body.trim() || (composeMode === "forward" && !forwardTo.trim())}
-                  className="h-9 rounded-full bg-[#0b57d0] px-6 text-sm font-medium text-white transition hover:bg-[#0a4ebb] hover:shadow-[0_1px_3px_1px_rgba(0,0,0,.15)] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
+
+              {/* Formatting toolbar. onMouseDown keeps the text selection while a button is clicked. */}
+              <div className="mx-4 mb-2 flex flex-wrap items-center gap-0.5 rounded-full bg-[#f0f4f9] px-2 py-1 text-[#444746]" role="toolbar" aria-label="Formatting options">
+                <select value={fontFamily} aria-label="Font" title="Font" onChange={(event) => { setFontFamily(event.target.value); format("fontName", event.target.value); }}
+                  className="h-8 max-w-[130px] cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-[#1f1f1f14]">
+                  {COMPOSER_FONTS.map(([label, value]) => <option key={label} value={value} style={{ fontFamily: value }}>{label}</option>)}
+                </select>
+                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
+                <select value={fontSize} aria-label="Size" title="Size" onChange={(event) => { setFontSize(event.target.value); format("fontSize", event.target.value); }}
+                  className="h-8 cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-[#1f1f1f14]">
+                  {COMPOSER_SIZES.map(([label, value]) => <option key={label} value={value}>{label}</option>)}
+                </select>
+                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
+                {([["bold", "bold", "Bold (Ctrl+B)"], ["italic", "italic", "Italic (Ctrl+I)"], ["underline", "underline", "Underline (Ctrl+U)"]] as const).map(([command, icon, label]) => (
+                  <button key={command} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format(command)} aria-label={label} title={label} className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name={icon} /></button>
+                ))}
+                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format("insertOrderedList")} aria-label="Numbered list" title="Numbered list" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="listNumbered" /></button>
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format("insertUnorderedList")} aria-label="Bulleted list" title="Bulleted list" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="listBulleted" /></button>
+                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { format("removeFormat"); setFontFamily(COMPOSER_FONTS[0][1]); setFontSize("3"); }} aria-label="Remove formatting" title="Remove formatting" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="formatClear" /></button>
+              </div>
+
+              <div className="flex items-center gap-3 px-4 pb-3 pt-1">
+                <button type="button" onClick={() => void sendMessage()} disabled={!canSend}
+                  className="h-9 rounded-full bg-[#5b4bd6] px-6 text-sm font-medium text-white transition hover:bg-[#4b3dc0] hover:shadow-[0_1px_3px_1px_rgba(0,0,0,.15)] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
+                <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => addFiles(event.target.files)} />
+                <ToolbarButton icon="attach" label="Attach files" onClick={() => fileInputRef.current?.click()} />
+                <span className="hidden text-xs text-[#9a9a9a] sm:inline">Ctrl + Enter to send</span>
                 <span className="ml-auto" />
                 <ToolbarButton icon="trash" label="Discard draft" onClick={() => setComposeMode(null)} />
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* ---------- Right column: AI reply panel ---------- */}
