@@ -363,12 +363,13 @@ export type MailDetailProps = {
   onDelete?: () => void;
   onArchive?: () => void;
   onSpam?: () => void;
+  onNotSpam?: () => void;
   onMarkUnread?: () => void;
   onPriorityChange: (priority: Priority) => void;
   onStar: () => void;
 };
 
-export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onMarkUnread, onPriorityChange, onStar }: MailDetailProps) {
+export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, onMarkUnread, onPriorityChange, onStar }: MailDetailProps) {
   const sender = formatSender(message.from);
   const address = senderAddress(message.from);
   const visibleAttachments = useMemo(() => message.attachments.filter((attachment) => !attachment.inline), [message.attachments]);
@@ -554,6 +555,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         <span className="ml-2 flex items-center">
           {onArchive && <ToolbarButton icon="archive" label="Archive" onClick={onArchive} className="hidden sm:flex" />}
           {onSpam && <ToolbarButton icon="spam" label="Report spam" onClick={onSpam} className="hidden sm:flex" />}
+          {onNotSpam && <button type="button" onClick={onNotSpam} className="mx-1 h-8 rounded-full border border-[#747775] px-3 text-xs font-medium text-[#444746] hover:bg-[#f2f2f2]">Not spam</button>}
           {onDelete && <ToolbarButton icon="trash" label="Delete" onClick={onDelete} disabled={deleting} />}
           {onMarkUnread && <><Divider /><ToolbarButton icon="unread" label="Mark as unread" onClick={onMarkUnread} /></>}
         </span>

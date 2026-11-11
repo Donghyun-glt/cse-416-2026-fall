@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       ? Math.floor(afterTimestamp / 1000)
       : undefined;
     const requestedMode = request.nextUrl.searchParams.get("mode");
-    const mailboxMode = requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash" || requestedMode === "sent"
+    const mailboxMode = requestedMode === "inbox" || requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash" || requestedMode === "sent" || requestedMode === "spam"
       ? requestedMode
       : "all";
     const requestedPageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
@@ -42,6 +42,10 @@ export async function GET(request: NextRequest) {
     let resultSizeEstimate: number | undefined;
     const labelIds = isDailyBriefing
       ? ["INBOX"]
+      : mailboxMode === "inbox"
+        ? ["INBOX"]
+      : mailboxMode === "spam"
+        ? ["SPAM"]
       : mailboxMode === "starred"
         ? ["STARRED"]
         : mailboxMode === "drafts"
@@ -51,15 +55,17 @@ export async function GET(request: NextRequest) {
         : mailboxMode === "sent"
           ? ["SENT"]
           : undefined;
-    // "All Emails" is everything you received (inbox + archived); mail you sent
-    // has its own Sent view, like Gmail.
+    // Like Gmail: "Inbox" is only mail that still carries the INBOX label, so
+    // archiving a message removes it from that view. "All Emails" is everything
+    // you received (inbox + archived); mail you sent has its own Sent view.
+    // Spam and Trash are only listed in their own views.
     const excludeSent = !isDailyBriefing && mailboxMode === "all";
 
     do {
       const list = await gmail.users.messages.list({
         userId: "me",
         labelIds,
-        includeSpamTrash: mailboxMode === "trash",
+        includeSpamTrash: mailboxMode === "trash" || mailboxMode === "spam",
         maxResults: isDailyBriefing ? 100 : 50,
         pageToken,
         q: [afterSeconds ? `after:${afterSeconds}` : "", excludeSent ? "-in:sent" : ""].filter(Boolean).join(" ") || undefined,
