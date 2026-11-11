@@ -27,12 +27,12 @@ test("All Emails preserves Gmail order while attaching database priorities", asy
       if (name === "googleapis") return { google: { gmail: () => gmail } };
       if (name === "@/lib/google") return { createGoogleOAuthClient: () => ({ setCredentials() {}, on() {} }) };
       if (name === "@/lib/gmail-session") return {
-        getGmailSession: async () => ({ access_token: "fake" }),
+        getGmailSessionWithUser: async () => ({ tokens: { access_token: "fake" }, userId: null }),
         attachGmailSessionToUser: async () => {},
       };
       if (name === "@/lib/gmail-message") return { parseGmailMessage: (message) => ({ id: message.id, date: message.id === "new-low" ? "2026-10-17T00:00:00Z" : "2026-10-16T00:00:00Z", draft: false }) };
       if (name === "@/lib/gmail-priority") return {
-        getOrAssignPriority: async (message) => message.id === "new-low" ? "low" : "urgent",
+        getOrAssignPriorities: async (messages) => new Map(messages.map((message) => [message.id, message.id === "new-low" ? "low" : "urgent"])),
       };
       if (name === "@/lib/mailflow-db") return { upsertUser: async () => 1 };
       if (name === "@/lib/mail-priority") return {
@@ -49,4 +49,6 @@ test("All Emails preserves Gmail order while attaching database priorities", asy
   assert.deepEqual(body.messages.map((message) => message.priority), ["low", "urgent"]);
   assert.equal("sortingPending" in body, false);
   assert.equal(body.nextPageToken, "next");
+  assert.deepEqual(body.messages.map((message) => message.partial), [true, true]);
+  assert.deepEqual(body.messages.map((message) => message.html), ["", ""]);
 });

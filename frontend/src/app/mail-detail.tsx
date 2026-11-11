@@ -20,6 +20,8 @@ export type Mail = {
   draft: boolean;
   priority: Priority;
   attachments: GmailAttachment[];
+  /** True while only list data (headers + snippet) is loaded; the body arrives when the message is opened. */
+  partial?: boolean;
 };
 
 type ComposeMode = "reply" | "replyAll" | "forward";
@@ -646,7 +648,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
         {/* ---------- Body ---------- */}
         <div className="pl-4 pr-4 pt-4 sm:pl-[72px] sm:pr-6">
-          <EmailBody html={message.html} />
+          {message.partial
+            ? <p className="py-6 text-sm leading-6 text-[#5e5e5e]" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-[#9a9a9a]">Loading message…</span></p>
+            : <EmailBody html={message.html} />}
         </div>
 
         {/* ---------- Attachments ---------- */}

@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { attachGmailSessionToUser, getGmailSession } from "@/lib/gmail-session";
-import { setPriority } from "@/lib/gmail-priority";
+import { attachGmailSessionToUser, getGmailSession, getGmailSessionWithUser } from "@/lib/gmail-session";
+import { parseGmailMessage } from "@/lib/gmail-message";
+import { getOrAssignPriority, setPriority } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
-import { isPriority } from "@/lib/mail-priority";
+import { isPriority, type Priority } from "@/lib/mail-priority";
 
 async function getAuthorizedGmail(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
@@ -14,6 +15,46 @@ async function getAuthorizedGmail(request: NextRequest) {
   const oauth2Client = createGoogleOAuthClient();
   oauth2Client.setCredentials(tokens);
   return google.gmail({ version: "v1", auth: oauth2Client });
+}
+
+/**
+ * GET /api/gmail/messages/[id]
+ * Full message for the detail view: sanitized HTML body and attachments.
+ * List responses carry headers and snippet only, so the client calls this
+ * when a message is opened.
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: RouteContext<"/api/gmail/messages/[id]">,
+) {
+  const sessionId = request.cookies.get("gmail_session")?.value;
+  const session = sessionId ? await getGmailSessionWithUser(sessionId) : undefined;
+  if (!sessionId || !session) return NextResponse.json({ connected: false }, { status: 401 });
+
+  try {
+    const { id } = await params;
+    const oauth2Client = createGoogleOAuthClient();
+    oauth2Client.setCredentials(session.tokens);
+    const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+    const result = await gmail.users.messages.get({ userId: "me", id, format: "full" });
+    const message = parseGmailMessage(result.data);
+    let priority: Priority = "fyi";
+    if (!message.draft) {
+      let userId = session.userId;
+      if (userId === null) {
+        const gmailProfile = await gmail.users.getProfile({ userId: "me" });
+        userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+        await attachGmailSessionToUser(sessionId, userId);
+      }
+      priority = await getOrAssignPriority(result.data, userId);
+    }
+    return NextResponse.json({ message: { ...message, priority } });
+  } catch (gmailError) {
+    const status = (gmailError as { code?: unknown }).code === 404 ? 404 : 502;
+    console.error("Gmail message request failed", gmailError);
+    return NextResponse.json({ error: status === 404 ? "message_not_found" : "gmail_request_failed" }, { status });
+  }
 }
 
 export async function PATCH(

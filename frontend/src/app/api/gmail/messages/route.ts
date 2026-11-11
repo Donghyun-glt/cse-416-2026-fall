@@ -1,17 +1,22 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
-import { attachGmailSessionToUser, getGmailSession } from "@/lib/gmail-session";
+import { attachGmailSessionToUser, getGmailSessionWithUser } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
-import { getOrAssignPriority } from "@/lib/gmail-priority";
+import { getOrAssignPriorities } from "@/lib/gmail-priority";
 import { upsertUser } from "@/lib/mailflow-db";
 import { comparePriority } from "@/lib/mail-priority";
 
+// Lists only need what a row shows. Bodies and attachments are fetched by
+// GET /api/gmail/messages/[id] when the user opens a message.
+const LIST_HEADERS = ["Subject", "From", "To", "Cc", "Date", "List-Unsubscribe"];
+
 export async function GET(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
-  const tokens = sessionId ? await getGmailSession(sessionId) : undefined;
+  const session = sessionId ? await getGmailSessionWithUser(sessionId) : undefined;
+  const tokens = session?.tokens;
 
-  if (!sessionId || !tokens) {
+  if (!sessionId || !session || !tokens) {
     return NextResponse.json({ connected: false, messages: [] }, { status: 401 });
   }
 
@@ -32,9 +37,14 @@ export async function GET(request: NextRequest) {
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
     const isDailyBriefing = Boolean(afterSeconds);
-    const gmailProfile = await gmail.users.getProfile({ userId: "me" });
-    const userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
-    await attachGmailSessionToUser(sessionId, userId);
+    // The session already knows its user after the first request, so the Gmail
+    // profile call and the user upsert only run once per login.
+    let userId = session.userId;
+    if (userId === null) {
+      const gmailProfile = await gmail.users.getProfile({ userId: "me" });
+      userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+      await attachGmailSessionToUser(sessionId, userId);
+    }
 
     const messageIds: string[] = [];
     let pageToken = requestedPageToken;
@@ -79,21 +89,26 @@ export async function GET(request: NextRequest) {
       pageToken = isDailyBriefing ? nextPageToken : undefined;
     } while (isDailyBriefing && pageToken);
 
-    const messages = await Promise.all(
-      messageIds.map(async (id) => {
-        const result = await gmail.users.messages.get({
-          userId: "me",
-          id,
-          format: "full",
-        });
-        const priority = result.data.labelIds?.includes("DRAFT") ? "fyi" : await getOrAssignPriority(result.data, userId);
-        const message = { ...parseGmailMessage(result.data), priority };
-        const receivedAt = Number(result.data.internalDate ?? 0);
-        return !afterSeconds || receivedAt >= afterSeconds * 1000 ? message : null;
-      }),
+    const fetched = await Promise.all(
+      messageIds.map(async (id) => (await gmail.users.messages.get({
+        userId: "me",
+        id,
+        format: "metadata",
+        metadataHeaders: LIST_HEADERS,
+      })).data),
+    );
+    const priorities = await getOrAssignPriorities(
+      fetched.filter((message) => !message.labelIds?.includes("DRAFT")),
+      userId,
     );
 
-    const filteredMessages = messages.filter((message) => message !== null);
+    const filteredMessages = fetched.flatMap((data) => {
+      const receivedAt = Number(data.internalDate ?? 0);
+      if (afterSeconds && receivedAt < afterSeconds * 1000) return [];
+      const priority = priorities.get(data.id ?? "") ?? "fyi";
+      // partial: the body has not been loaded yet (html is empty on purpose).
+      return [{ ...parseGmailMessage(data), html: "", priority, partial: true }];
+    });
 
     return NextResponse.json({
       connected: true,

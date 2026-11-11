@@ -99,6 +99,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [resultSizeEstimate, setResultSizeEstimate] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
+  const bodyCacheRef = useRef(new Map<string, Pick<Mail, "html" | "attachments">>());
 
   const loadMessages = useCallback(async (targetView: View, showLoading = false, pageToken = "") => {
     requestRef.current?.abort();
@@ -131,7 +132,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setSelectedMail((current) => {
           if (!current) return null;
           const synced = nextMessages.find((message) => message.id === current.id);
-          return synced ? { ...synced, html: current.html } : current;
+          return synced ? { ...synced, html: current.html, attachments: current.attachments, partial: current.partial } : current;
         });
       }
       if (targetView !== "briefing") {
@@ -229,9 +230,25 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setSelectedIds(new Set());
   };
   const openMessage = (message: Mail) => {
-    const readMessage = { ...message, unread: false };
+    // Lists carry headers and snippet only. Show those immediately, then load
+    // the body; bodies already opened in this session come from the cache.
+    const body = bodyCacheRef.current.get(message.id);
+    const readMessage = body ? { ...message, ...body, unread: false, partial: false } : { ...message, unread: false };
     setSelectedMail(readMessage);
-    setMessages((current) => current.map((item) => item.id === message.id ? readMessage : item));
+    setMessages((current) => current.map((item) => item.id === message.id ? { ...item, unread: false } : item));
+    if (readMessage.partial) {
+      void fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}`, { cache: "no-store" })
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({})) as { message?: Mail };
+          if (!response.ok || !data.message) throw new Error("메일 내용을 불러오지 못했습니다.");
+          const loaded = { html: data.message.html, attachments: data.message.attachments };
+          bodyCacheRef.current.set(message.id, loaded);
+          setSelectedMail((current) => current?.id === message.id ? { ...current, ...loaded, partial: false } : current);
+        })
+        .catch((bodyError: unknown) => {
+          setError(bodyError instanceof Error ? bodyError.message : "메일 내용을 불러오지 못했습니다.");
+        });
+    }
     if (!message.unread) return;
 
     void fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}`, {

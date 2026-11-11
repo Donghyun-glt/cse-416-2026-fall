@@ -31,6 +31,20 @@ export async function getStoredPriority(userId: number, gmailMessageId: string) 
   return result.rows[0]?.priority ?? null;
 }
 
+/** One round trip for a whole page of messages instead of one query each. */
+export async function getStoredPriorities(userId: number, gmailMessageIds: readonly string[]) {
+  const stored = new Map<string, Priority>();
+  if (gmailMessageIds.length === 0) return stored;
+  const result = await query<{ gmail_message_id: string; priority: Priority }>(`
+    UPDATE message_priorities
+    SET last_seen_at = NOW()
+    WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+    RETURNING gmail_message_id, priority
+  `, [userId, [...gmailMessageIds]]);
+  for (const row of result.rows) stored.set(row.gmail_message_id, row.priority);
+  return stored;
+}
+
 export async function recordPriority(input: {
   userId: number;
   gmailMessageId: string;

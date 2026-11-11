@@ -64,6 +64,22 @@ export async function getGmailSession(sessionId: string): Promise<Credentials | 
   return sealed ? openGmailTokens(sealed) : undefined;
 }
 
+/**
+ * Same lookup as getGmailSession, but also returns the MailFlow user already
+ * linked to this session so callers can skip the Gmail profile round trip.
+ */
+export async function getGmailSessionWithUser(sessionId: string): Promise<{ tokens: Credentials; userId: number | null } | undefined> {
+  const result = await query<{ token_ciphertext: string; user_id: number | null }>(`
+    UPDATE oauth_sessions
+    SET last_seen_at = NOW()
+    WHERE session_hash = $1 AND expires_at > NOW()
+    RETURNING token_ciphertext, user_id
+  `, [sessionHash(sessionId)]);
+  const row = result.rows[0];
+  const tokens = row ? openGmailTokens(row.token_ciphertext) : undefined;
+  return tokens ? { tokens, userId: row.user_id ?? null } : undefined;
+}
+
 export async function attachGmailSessionToUser(sessionId: string, userId: number) {
   await query(`
     UPDATE oauth_sessions
