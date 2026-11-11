@@ -8,6 +8,7 @@ import { MailDetail, formatSender, initials, type Mail } from "./mail-detail";
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
+type BulkAction = "archive" | "spam" | "notSpam" | "read" | "unread";
 type View = "briefing" | "inbox" | "all" | "starred" | "sent" | "drafts" | "spam" | "trash";
 
 const priorityDisplay: Record<Priority, { label: string; className: string }> = {
@@ -21,13 +22,14 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${display.className}`}>{display.label}</span>;
 }
 
-function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "allMail" | "spam" | "calendar" | "trash" | "back" | "star" | "sent" | "draft" | "reply" | "forward" | "paperclip" | "download"; className?: string }) {
+function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "sun" | "inbox" | "allMail" | "spam" | "archive" | "calendar" | "trash" | "back" | "star" | "sent" | "draft" | "reply" | "forward" | "paperclip" | "download"; className?: string }) {
   const paths = {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" /></>,
     inbox: <><path d="M4 5h16l2 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6l2-8Z" /><path d="M2 13h5l2 3h6l2-3h5" /></>,
     allMail: <><rect x="2" y="8" width="16" height="12" rx="2" /><path d="m2 10 8 5 8-5" /><path d="M6 4h14a2 2 0 0 1 2 2v10" /></>,
     spam: <><path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3L8.3 3Z" /><path d="M12 8v5M12 16.5v.01" /></>,
+    archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M12 12v5M9.5 14.5 12 17l2.5-2.5" /></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
     trash: <><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 10v7M14 10v7" /></>,
     back: <><path d="m15 18-6-6 6-6" /><path d="M9 12h11" /></>,
@@ -91,6 +93,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [deleting, setDeleting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkRestoring, setBulkRestoring] = useState(false);
+  const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
+  const [onlyAttachments, setOnlyAttachments] = useState(false);
+  const [onlyUnread, setOnlyUnread] = useState(false);
   const [view, setView] = useState<View>("briefing");
   const [profile, setProfile] = useState<UserProfile>({ name: "", email: "" });
   const [allPageTokens, setAllPageTokens] = useState([""]);
@@ -113,7 +118,8 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         : targetView === "all"
           ? `?mode=all&page=${allPageIndex}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`
           : `?mode=${targetView}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
-      const response = await fetch(`/api/gmail/messages${query}`, { cache: "no-store", signal: controller.signal });
+      const filterQuery = targetView === "briefing" ? "" : `${onlyAttachments ? "&attachment=1" : ""}${onlyUnread ? "&unread=1" : ""}`;
+      const response = await fetch(`/api/gmail/messages${query}${filterQuery}`, { cache: "no-store", signal: controller.signal });
       const data = (await response.json()) as MailResponse;
       if (response.status === 401) {
         setConnected(false);
@@ -148,7 +154,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setLoading(false);
       }
     }
-  }, [allPageIndex]);
+  }, [allPageIndex, onlyAttachments, onlyUnread]);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -210,11 +216,22 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setView(next);
     setSelectedMail(null);
     setSelectedIds(new Set());
+    setOnlyAttachments(false);
+    setOnlyUnread(false);
     if (next !== "briefing") {
       setAllPageTokens([""]);
       setAllPageIndex(0);
       setNextPageToken(null);
     }
+  };
+  // Filters change which messages Gmail returns, so paging starts over.
+  const toggleFilter = (filter: "attachment" | "unread") => {
+    if (filter === "attachment") setOnlyAttachments((current) => !current);
+    else setOnlyUnread((current) => !current);
+    setSelectedIds(new Set());
+    setAllPageTokens([""]);
+    setAllPageIndex(0);
+    setNextPageToken(null);
   };
   const goToNextPage = () => {
     if (!nextPageToken) return;
@@ -302,7 +319,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setSelectedMail({ ...previous, priority });
     setMessages((current) => {
       const updated = current.map((message) => message.id === previous.id ? { ...message, priority } : message);
-      return view === "inbox" || view === "all" || view === "sent" || view === "spam" ? updated : updated.sort(comparePriority);
+      return view === "briefing" ? updated.sort(comparePriority) : updated;
     });
     setError(null);
     try {
@@ -375,6 +392,38 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       setError(deleteError instanceof Error ? deleteError.message : "선택한 메일을 휴지통으로 이동하지 못했습니다.");
     } finally {
       setBulkDeleting(false);
+    }
+  };
+  // Gmail-style actions on the checked rows. A message leaves the list only
+  // when the action takes it out of the mailbox being shown.
+  const applyBulkAction = async (action: BulkAction) => {
+    if (selectedIds.size === 0 || bulkAction) return;
+    const ids = [...selectedIds];
+    setBulkAction(action);
+    setError(null);
+    try {
+      const results = await Promise.all(ids.map(async (id) => {
+        const response = await fetch(`/api/gmail/messages/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        return { id, ok: response.ok };
+      }));
+      const doneIds = new Set(results.filter((result) => result.ok).map((result) => result.id));
+      const failedIds = results.filter((result) => !result.ok).map((result) => result.id);
+      const leavesView = action === "spam" || action === "notSpam" || (action === "archive" && view === "inbox") || (action === "read" && onlyUnread);
+      setMessages((current) => leavesView
+        ? current.filter((message) => !doneIds.has(message.id))
+        : action === "read" || action === "unread"
+          ? current.map((message) => doneIds.has(message.id) ? { ...message, unread: action === "unread" } : message)
+          : current);
+      setSelectedIds(new Set(failedIds));
+      if (failedIds.length > 0) throw new Error(`The action could not be applied to ${failedIds.length} message${failedIds.length === 1 ? "" : "s"}.`);
+    } catch (bulkError) {
+      setError(bulkError instanceof Error ? bulkError.message : "The action could not be applied to the selected messages.");
+    } finally {
+      setBulkAction(null);
     }
   };
   const moveSelectedMailsToAllEmails = async () => {
@@ -478,18 +527,52 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
             </div>}
             {error && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
             {(view === "trash" || view === "spam") && <p className="mb-3 rounded-xl bg-[#ececea] px-4 py-3 text-center text-sm text-[#6f6b64]">Messages in {view === "trash" ? "Trash" : "Spam"} are automatically deleted after 30 days.</p>}
+            {view !== "briefing" && <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Filters">
+              {([["attachment", "Has attachment", onlyAttachments], ["unread", "Is unread", onlyUnread]] as const).map(([filter, label, active]) => (
+                <button key={filter} type="button" onClick={() => toggleFilter(filter)} aria-pressed={active}
+                  className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition ${active ? "border-[#5944d8] bg-[#eeecfb] text-[#5742d5]" : "border-[#d9d6cf] bg-white text-[#655f58] hover:bg-[#f6f5f1]"}`}>
+                  {filter === "attachment" && <Icon name="paperclip" className="h-3.5 w-3.5" />}{label}{active && <span aria-hidden="true">×</span>}
+                </button>
+              ))}
+            </div>}
             {view !== "briefing" && <div className="sticky top-0 z-20 mb-3 flex h-12 items-center justify-between rounded-xl border border-[#e1ded8] bg-white/95 px-4 shadow-[0_3px_12px_rgba(31,31,27,0.08)] backdrop-blur">
-              <div className="flex items-center gap-2"><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-[#77736b]"><input type="checkbox" checked={messages.length > 0 && messages.every((message) => selectedIds.has(message.id))} onChange={toggleAllSelections} aria-label="Select all messages on this page" className="h-4 w-4 cursor-pointer accent-[#5944d8]" /><span className="hidden sm:inline">Select</span></label>{selectedIds.size > 0 && (view === "trash" ? <button type="button" onClick={() => void moveSelectedMailsToAllEmails()} disabled={bulkRestoring} aria-label="Move selected messages to All Emails" className="ml-2 flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-bold text-[#655f58] transition hover:bg-[#f0eee9] disabled:opacity-40"><Icon name="inbox" className="h-4 w-4" /><span>{bulkRestoring ? "Moving…" : `Move to All Emails (${selectedIds.size})`}</span></button> : <button type="button" onClick={() => void moveSelectedMailsToTrash()} disabled={bulkDeleting} aria-label="Move selected messages to trash" className="ml-2 flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-bold text-[#655f58] transition hover:bg-[#f0eee9] disabled:opacity-40"><Icon name="trash" className="h-4 w-4" /><span>{bulkDeleting ? "Moving…" : `Delete (${selectedIds.size})`}</span></button>)}</div>
+              <div className="flex items-center gap-2"><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-[#77736b]"><input type="checkbox" checked={messages.length > 0 && messages.every((message) => selectedIds.has(message.id))} onChange={toggleAllSelections} aria-label="Select all messages on this page" className="h-4 w-4 cursor-pointer accent-[#5944d8]" /><span className="hidden sm:inline">Select</span></label>{selectedIds.size > 0 && (() => {
+                const busy = Boolean(bulkAction) || bulkDeleting || bulkRestoring;
+                const anyUnread = messages.some((message) => selectedIds.has(message.id) && message.unread);
+                const bulkButton = (icon: Parameters<typeof Icon>[0]["name"], label: string, onClick: () => void, working = false) => (
+                  <button key={label} type="button" onClick={onClick} disabled={busy} aria-label={`${label} (${selectedIds.size} selected)`} title={label}
+                    className="flex h-9 items-center gap-2 rounded-lg px-2.5 text-xs font-bold text-[#655f58] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-40">
+                    <Icon name={icon} className="h-4 w-4" /><span className="hidden md:inline">{working ? "Working…" : label}</span>
+                  </button>
+                );
+                const archive = bulkButton("archive", "Archive", () => void applyBulkAction("archive"), bulkAction === "archive");
+                const spam = bulkButton("spam", "Report spam", () => void applyBulkAction("spam"), bulkAction === "spam");
+                const trash = bulkButton("trash", view === "drafts" ? "Discard drafts" : "Delete", () => void moveSelectedMailsToTrash(), bulkDeleting);
+                const readState = anyUnread
+                  ? bulkButton("mail", "Mark as read", () => void applyBulkAction("read"), bulkAction === "read")
+                  : bulkButton("mail", "Mark as unread", () => void applyBulkAction("unread"), bulkAction === "unread");
+                // Each mailbox offers only the actions that make sense there, like Gmail.
+                const actions = view === "trash"
+                  ? [bulkButton("inbox", "Restore", () => void moveSelectedMailsToAllEmails(), bulkRestoring)]
+                  : view === "spam"
+                    ? [bulkButton("inbox", "Not spam", () => void applyBulkAction("notSpam"), bulkAction === "notSpam"), trash, readState]
+                    : view === "drafts"
+                      ? [trash]
+                      : view === "sent"
+                        ? [trash, readState]
+                        : [archive, spam, trash, readState];
+                return <span className="ml-2 flex items-center gap-0.5"><span className="mr-1 whitespace-nowrap text-xs font-semibold text-[#5944d8]">{selectedIds.size} selected</span>{actions}</span>;
+              })()}</div>
               <div className="flex items-center gap-1"><button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} aria-label="Previous page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">‹</button><button type="button" onClick={goToNextPage} disabled={!nextPageToken} aria-label="Next page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">›</button></div>
             </div>}
             <div className="overflow-hidden rounded-2xl border border-[#e1ded8] bg-white shadow-[0_2px_8px_rgba(31,31,27,0.04)]">
-              {loading ? <div className="p-8 text-center text-sm text-[#98948a]">Loading messages…</div> : messages.length === 0 ? <div className="p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#eeecfb] text-[#5944d8]"><Icon name="inbox" /></div><p className="mt-4 font-bold">You&apos;re all caught up</p><p className="mt-1 text-sm text-[#99958c]">{view === "briefing" ? "No inbox messages have arrived since midnight." : view === "sent" ? "You haven't sent any messages yet." : view === "spam" ? "Nothing in Spam." : view === "inbox" ? "Your inbox is empty. Archived mail is in All Emails." : "There are no messages to show."}</p></div> : messages.map((message, index) => {
+              {loading ? <div className="p-8 text-center text-sm text-[#98948a]">Loading messages…</div> : messages.length === 0 ? <div className="p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#eeecfb] text-[#5944d8]"><Icon name="inbox" /></div><p className="mt-4 font-bold">You&apos;re all caught up</p><p className="mt-1 text-sm text-[#99958c]">{view === "briefing" ? "No inbox messages have arrived since midnight." : view === "sent" ? "You haven't sent any messages yet." : view === "spam" ? "Nothing in Spam." : onlyAttachments || onlyUnread ? "No messages match these filters." : view === "inbox" ? "Your inbox is empty. Archived mail is in All Emails." : "There are no messages to show."}</p></div> : messages.map((message, index) => {
                 const sender = view === "sent" ? `To: ${formatSender(message.to.split(",")[0] || "") || "(no recipient)"}` : formatSender(message.from);
                 const color = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"][index % 5];
                 const rowTone = !message.unread ? "bg-[#f1f1ef] hover:bg-[#eaeae7]" : "bg-white hover:bg-[#faf9f6]";
                 const startsGroup = index === 0 || messages[index - 1].priority !== message.priority;
                 return <article key={message.id} className={index ? "border-t border-[#deddd9]" : ""}>
-                  {startsGroup && view !== "inbox" && view !== "all" && view !== "sent" && view !== "drafts" && view !== "spam" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
+                  {startsGroup && view === "briefing" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
                     <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="shrink-0 text-[#77736b]"><Icon name="paperclip" className="h-4 w-4" /></span>}{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>

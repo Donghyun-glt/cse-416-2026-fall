@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
     const mailboxMode = requestedMode === "inbox" || requestedMode === "starred" || requestedMode === "drafts" || requestedMode === "trash" || requestedMode === "sent" || requestedMode === "spam"
       ? requestedMode
       : "all";
+    // Optional mailbox filters, applied by Gmail's own search.
+    const onlyAttachments = request.nextUrl.searchParams.get("attachment") === "1";
+    const onlyUnread = request.nextUrl.searchParams.get("unread") === "1";
     const requestedPageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
 
     const oauth2Client = createGoogleOAuthClient();
@@ -78,7 +81,12 @@ export async function GET(request: NextRequest) {
         includeSpamTrash: mailboxMode === "trash" || mailboxMode === "spam",
         maxResults: isDailyBriefing ? 100 : 50,
         pageToken,
-        q: [afterSeconds ? `after:${afterSeconds}` : "", excludeSent ? "-in:sent" : ""].filter(Boolean).join(" ") || undefined,
+        q: [
+          afterSeconds ? `after:${afterSeconds}` : "",
+          excludeSent ? "-in:sent" : "",
+          !isDailyBriefing && onlyAttachments ? "has:attachment" : "",
+          !isDailyBriefing && onlyUnread ? "is:unread" : "",
+        ].filter(Boolean).join(" ") || undefined,
       });
 
       messageIds.push(
