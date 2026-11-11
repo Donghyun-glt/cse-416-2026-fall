@@ -434,6 +434,16 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const [files, setFiles] = useState<File[]>([]);
   const [fontFamily, setFontFamily] = useState<string>(COMPOSER_FONTS[0][1]);
   const [fontSize, setFontSize] = useState<string>("3");
+  // Draft autosave: like Gmail, an unfinished reply is kept in Drafts.
+  const [draftStatus, setDraftStatus] = useState<"" | "saving" | "saved" | "error">("");
+  const [revision, setRevision] = useState(0);
+  const draftIdRef = useRef("");
+  const dirtyRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Latest composer contents, readable from timers and from unmount cleanup
+  // (by then the editor element itself is already gone).
+  const composerStateRef = useRef<{ mode: ComposeMode | null; body: string; html: string; to: string; files: File[] }>({ mode: null, body: "", html: "", to: "", files: [] });
   const [modeOpen, setModeOpen] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
   const closeMode = useCallback(() => setModeOpen(false), []);
@@ -454,6 +464,10 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setFontSize("3");
     savedRangeRef.current = null;
     if (composerRef.current) composerRef.current.innerHTML = "";
+    composerStateRef.current = { mode, body: "", html: "", to: "", files: [] };
+    draftIdRef.current = "";
+    dirtyRef.current = false;
+    setDraftStatus("");
     setComposeError(null);
     setMoreOpen(false);
     setModeOpen(false);
@@ -490,6 +504,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     // so the placeholder comes back.
     if (!text.trim() && !editor.querySelector("li")) editor.innerHTML = "";
     setBody(text);
+    composerStateRef.current.html = editor.innerHTML;
+    // Formatting can change without the text changing, so autosave follows this counter too.
+    setRevision((current) => current + 1);
     rememberSelection();
   };
   const format = (command: string, value?: string) => {
@@ -520,6 +537,78 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       setFiles(next);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Saves run one after another so an older save can never overwrite a newer one.
+  const saveDraft = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      const state = composerStateRef.current;
+      if (!dirtyRef.current || !state.mode || !state.body.trim()) return;
+      dirtyRef.current = false;
+      setDraftStatus("saving");
+      try {
+        const form = new FormData();
+        form.set("action", state.mode);
+        form.set("to", state.to);
+        form.set("body", state.body);
+        form.set("html", state.html);
+        if (draftIdRef.current) form.set("draftId", draftIdRef.current);
+        for (const file of state.files) form.append("files", file, file.name);
+        const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/draft`, { method: "POST", body: form });
+        const result = await response.json().catch(() => ({})) as { draftId?: string };
+        if (!response.ok || !result.draftId) throw new Error("draft_not_saved");
+        draftIdRef.current = result.draftId;
+        setDraftStatus(dirtyRef.current ? "" : "saved");
+      } catch {
+        dirtyRef.current = true;
+        setDraftStatus("error");
+      }
+    });
+    return saveChainRef.current;
+  }, [message.id]);
+
+  // Autosave shortly after the user stops typing, attaching, or changing recipients.
+  useEffect(() => {
+    composerStateRef.current = { ...composerStateRef.current, mode: composeMode, body, to: forwardTo, files };
+    if (!composeMode || !body.trim()) return;
+    dirtyRef.current = true;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => void saveDraft(), 1500);
+  }, [body, composeMode, files, forwardTo, revision, saveDraft]);
+
+  // Leaving the message (back to the list, or opening another one) keeps the
+  // unfinished reply in Drafts instead of losing it.
+  useEffect(() => () => {
+    if (dirtyRef.current) void saveDraft();
+    else if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+  }, [saveDraft]);
+
+  const discardDraft = async () => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    dirtyRef.current = false;
+    composerStateRef.current = { mode: null, body: "", html: "", to: "", files: [] };
+    setComposeMode(null);
+    setBody("");
+    setFiles([]);
+    setDraftStatus("");
+    await saveChainRef.current;
+    const draftId = draftIdRef.current;
+    draftIdRef.current = "";
+    if (!draftId) return;
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/draft?draftId=${encodeURIComponent(draftId)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("draft_not_discarded");
+      setToast("Draft discarded");
+    } catch {
+      setToast("The draft could not be removed from Drafts.");
+    }
   };
 
   const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
@@ -590,6 +679,14 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setSending(true);
     setComposeError(null);
     try {
+      // Stop autosave and let any save in flight finish, so the draft id is
+      // known and the server can remove that draft after sending.
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      dirtyRef.current = false;
+      await saveChainRef.current;
       // Sent as form data so files travel as binary. The plain-text version is
       // what clients without HTML support show; the HTML carries the formatting.
       const form = new FormData();
@@ -597,16 +694,22 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       form.set("to", forwardTo);
       form.set("body", body);
       form.set("html", composerRef.current?.innerHTML ?? "");
+      if (draftIdRef.current) form.set("draftId", draftIdRef.current);
       for (const file of files) form.append("files", file, file.name);
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, { method: "POST", body: form });
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(response.status === 413 || result.error === "attachments_too_large" ? `Attachments can be up to ${formatBytes(MAX_ATTACHMENT_BYTES)} in total.` : result.error ?? "Message could not be sent.");
+      draftIdRef.current = "";
+      composerStateRef.current = { mode: null, body: "", html: "", to: "", files: [] };
+      setDraftStatus("");
       setComposeMode(null);
       setBody("");
       setFiles([]);
       setForwardTo("");
       setToast("Message sent");
     } catch (sendError) {
+      // The text is still unsent, so keep it protected by autosave.
+      dirtyRef.current = true;
       setComposeError(sendError instanceof Error ? sendError.message : "Message could not be sent.");
     } finally {
       setSending(false);
@@ -881,8 +984,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => addFiles(event.target.files)} />
                 <ToolbarButton icon="attach" label="Attach files" onClick={() => fileInputRef.current?.click()} />
                 <span className="hidden text-xs text-[#9a9a9a] sm:inline">Ctrl + Enter to send</span>
+                <span className={`text-xs ${draftStatus === "error" ? "text-[#a50e0e]" : "text-[#5e5e5e]"}`} role="status">
+                  {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Saved to Drafts" : draftStatus === "error" ? "Draft not saved. Retrying when you type." : ""}
+                </span>
                 <span className="ml-auto" />
-                <ToolbarButton icon="trash" label="Discard draft" onClick={() => setComposeMode(null)} />
+                <ToolbarButton icon="trash" label="Discard draft" onClick={() => void discardDraft()} />
               </div>
             </div>
           </div>
