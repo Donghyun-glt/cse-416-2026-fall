@@ -235,7 +235,7 @@ function FileBadge({ kind, className = "h-5 w-5" }: { kind: FileKind; className?
 // Email body (sandboxed iframe that grows with its content)
 // ---------------------------------------------------------------------------
 
-function EmailBody({ html }: { html: string }) {
+function EmailBody({ html, inert, onReady }: { html: string; inert?: boolean; onReady?: () => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   const [height, setHeight] = useState(120);
@@ -243,10 +243,15 @@ function EmailBody({ html }: { html: string }) {
     const doc = frameRef.current?.contentDocument;
     if (doc) setHeight(Math.max(60, doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0));
   }, []);
+  const onReadyRef = useRef(onReady);
+  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
   const handleLoad = useCallback(() => {
     syncHeight();
     const doc = frameRef.current?.contentDocument;
     if (!doc?.body) return;
+    // The body is laid out at its real height now, so things placed below it
+    // (the restored draft) will not jump when it appears.
+    onReadyRef.current?.();
     observerRef.current?.disconnect();
     observerRef.current = new ResizeObserver(syncHeight);
     observerRef.current.observe(doc.body);
@@ -259,7 +264,7 @@ function EmailBody({ html }: { html: string }) {
     if (frameRef.current?.contentDocument?.readyState === "complete") handleLoad();
     return () => observerRef.current?.disconnect();
   }, [handleLoad, html]);
-  return <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-transparent" style={{ height }} />;
+  return <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-transparent" style={{ height, pointerEvents: inert ? "none" : undefined }} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +470,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const savedSignatureRef = useRef("");
   const pendingHtmlRef = useRef<string | null>(null);
   const resumedRef = useRef(false);
-  const openedAtRef = useRef(0);
+  // True for a moment after the message opens; see the double-click note below.
+  const [settling, setSettling] = useState(true);
+  const [bodyReady, setBodyReady] = useState(false);
+  const markBodyReady = useCallback(() => setBodyReady(true), []);
+  const [loadedDraft, setLoadedDraft] = useState<{ draft: SavedDraft; files: File[] | null } | null>(null);
   const onDraftChangeRef = useRef(onDraftChange);
   useEffect(() => { onDraftChangeRef.current = onDraftChange; }, [onDraftChange]);
   const [modeOpen, setModeOpen] = useState(false);
@@ -643,21 +652,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
           return new File([await response.blob()], attachment.filename, { type: attachment.mimeType });
         })).catch(() => null);
         if (cancelled || composerStateRef.current.mode) return;
-        const mode: ComposeMode = draft.action === "replyAll" && !canReplyAll ? "reply" : draft.action;
-        const state = { mode, body: draft.text, html: draft.html, to: draft.to, files: restored ?? [] };
-        composerStateRef.current = state;
-        // If an attachment could not be brought back, leave the draft marked as
-        // changed so the user sees it is not identical to what was saved.
-        savedSignatureRef.current = restored ? signatureOf(state) : "";
-        draftIdRef.current = draft.draftId;
-        dirtyRef.current = false;
-        pendingHtmlRef.current = draft.html;
-        setComposeMode(mode);
-        setForwardTo(draft.to);
-        setBody(draft.text);
-        setFiles(state.files);
-        setDraftStatus("saved");
-        if (!restored) setComposeError("Some attachments from this draft could not be loaded. Attach them again before sending.");
+        setLoadedDraft({ draft, files: restored });
       } catch {
         // The message itself still opens normally; the draft stays in Drafts.
       } finally {
@@ -670,26 +665,63 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per opened message; resumedRef guards re-entry.
   }, [initialDraft, message.hasDraft, message.id]);
 
+  // Like Gmail, show the message first and the unfinished reply after it:
+  // the draft is placed in the composer only once the body has been laid out.
+  useEffect(() => {
+    if (!loadedDraft || !bodyReady || composerStateRef.current.mode) return;
+    const { draft, files: restored } = loadedDraft;
+    const mode: ComposeMode = draft.action === "replyAll" && !canReplyAll ? "reply" : draft.action;
+    const state = { mode, body: draft.text, html: draft.html, to: draft.to, files: restored ?? [] };
+    composerStateRef.current = state;
+    // If an attachment could not be brought back, leave the draft marked as
+    // changed so the user sees it is not identical to what was saved.
+    savedSignatureRef.current = restored ? signatureOf(state) : "";
+    draftIdRef.current = draft.draftId;
+    dirtyRef.current = false;
+    pendingHtmlRef.current = draft.html;
+    setLoadedDraft(null);
+    setComposeMode(mode);
+    setForwardTo(draft.to);
+    setBody(draft.text);
+    setFiles(state.files);
+    setDraftStatus("saved");
+    if (!restored) setComposeError("Some attachments from this draft could not be loaded. Attach them again before sending.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applies a loaded draft once; the other values are read at that moment.
+  }, [bodyReady, loadedDraft]);
+
+  // Safety net: if the body never reports that it finished loading, do not
+  // hold the draft back forever.
+  useEffect(() => {
+    if (message.partial || bodyReady) return;
+    const timeout = window.setTimeout(() => setBodyReady(true), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [bodyReady, message.partial]);
+
   // The editor element only exists once the composer is shown, so restored
-  // content is written into it right after that render.
+  // content is written into it right after that render, then scrolled to.
   useEffect(() => {
     if (!composeMode || pendingHtmlRef.current === null || !composerRef.current) return;
     composerRef.current.innerHTML = pendingHtmlRef.current;
     pendingHtmlRef.current = null;
-    composerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    const editor = composerRef.current;
+    const timeout = window.setTimeout(() => editor.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+    return () => window.clearTimeout(timeout);
   }, [composeMode]);
 
-  // Double-clicking a row in the list opens the message on the first click;
-  // the second click then lands on this view and the browser treats it as a
-  // double-click here, selecting the body. Ignore multi-clicks for a moment
-  // after opening, and drop any selection carried over from the list.
+  // Double-clicking a row in the list opens the message on the first click.
+  // The second click then lands on this new view, and the browser treats it as
+  // a double-click here. When it lands on the message body (an iframe with its
+  // own document) the body ends up selected, and this component never sees
+  // that click. So for a moment after opening, nothing here is selectable and
+  // the body ignores the pointer; any selection carried over is cleared.
   useEffect(() => {
-    openedAtRef.current = Date.now();
     window.getSelection()?.removeAllRanges();
+    const timeout = window.setTimeout(() => {
+      window.getSelection()?.removeAllRanges();
+      setSettling(false);
+    }, 700);
+    return () => window.clearTimeout(timeout);
   }, []);
-  useEffect(() => {
-    if (!message.partial && Date.now() - openedAtRef.current < 1000) window.getSelection()?.removeAllRanges();
-  }, [message.partial]);
 
   const discardDraft = async () => {
     if (saveTimerRef.current !== null) {
@@ -864,8 +896,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const pillClass = "flex h-9 items-center gap-2 rounded-full border border-[#747775] bg-white pl-3 pr-4 text-sm font-medium text-[#444746] transition-colors hover:bg-[#f2f2f2] hover:shadow-[0_1px_2px_rgba(60,64,67,.3)]";
 
   return (
-    <section className="flex min-h-screen flex-col bg-white text-[#1f1f1f]" style={{ fontFamily: GMAIL_FONT }}
-      onMouseDownCapture={(event) => { if (event.detail > 1 && Date.now() - openedAtRef.current < 800) event.preventDefault(); }}>
+    <section className={`flex min-h-screen flex-col bg-white text-[#1f1f1f] ${settling ? "select-none" : ""}`} style={{ fontFamily: GMAIL_FONT }}
+      onMouseDownCapture={(event) => { if (settling && event.detail > 1) event.preventDefault(); }}>
       {/* ---------- Top action toolbar ---------- */}
       <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center bg-white pl-2 pr-3 sm:pl-4">
         <ToolbarButton icon="back" label="Back to Inbox" onClick={onBack} />
@@ -965,7 +997,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         <div className="pl-4 pr-4 pt-4 sm:pl-[72px] sm:pr-6">
           {message.partial
             ? <p className="py-6 text-sm leading-6 text-[#5e5e5e]" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-[#9a9a9a]">Loading message…</span></p>
-            : <EmailBody html={message.html} />}
+            : <EmailBody html={message.html} inert={settling} onReady={markBodyReady} />}
         </div>
 
         {/* ---------- Attachments ---------- */}
