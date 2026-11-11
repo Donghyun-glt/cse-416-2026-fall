@@ -97,6 +97,12 @@ export async function GET(request: NextRequest) {
       pageToken = isDailyBriefing ? nextPageToken : undefined;
     } while (isDailyBriefing && pageToken);
 
+    // Threads that contain an unfinished reply get a "Draft" marker in the
+    // list, like Gmail. A failure here only hides the marker.
+    const draftThreadsPromise = gmail.users.drafts.list({ userId: "me", maxResults: 100 })
+      .then((result) => new Set((result.data.drafts ?? []).flatMap((draft) => (draft.message?.threadId ? [draft.message.threadId] : []))))
+      .catch(() => new Set<string>());
+
     const fetched = await Promise.all(
       messageIds.map(async (id) => (await gmail.users.messages.get({
         userId: "me",
@@ -110,12 +116,15 @@ export async function GET(request: NextRequest) {
       userId,
     );
 
+    const draftThreads = await draftThreadsPromise;
+
     const filteredMessages = fetched.flatMap((data) => {
       const receivedAt = Number(data.internalDate ?? 0);
       if (afterSeconds && receivedAt < afterSeconds * 1000) return [];
       const priority = priorities.get(data.id ?? "") ?? "fyi";
       // partial: the body has not been loaded yet (html is empty on purpose).
-      return [{ ...parseGmailMessage(data), html: "", priority, partial: true }];
+      const hasDraft = !data.labelIds?.includes("DRAFT") && draftThreads.has(data.threadId ?? "");
+      return [{ ...parseGmailMessage(data), html: "", priority, partial: true, hasDraft }];
     });
 
     return NextResponse.json({

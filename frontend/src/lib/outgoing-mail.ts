@@ -159,6 +159,55 @@ function rawMessage(headers: Record<string, string>, content: { text: string; ht
   return Buffer.from(lines.join("\r\n"), "utf8").toString("base64url");
 }
 
+export const DRAFT_SOURCE_HEADER = "X-MailFlow-Source";
+export const DRAFT_ACTION_HEADER = "X-MailFlow-Action";
+const QUOTE_START = '<br><div class="gmail_quote">';
+const BODY_OPEN = '<div dir="ltr">';
+
+function bodyOf(part: gmail_v1.Schema$MessagePart | undefined, mimeType: string): string | null {
+  if (!part) return null;
+  if (part.mimeType === mimeType && part.body?.data && !part.filename) return decodeBody(part.body.data);
+  for (const child of part.parts ?? []) {
+    const body = bodyOf(child, mimeType);
+    if (body) return body;
+  }
+  return null;
+}
+
+export type DraftContent = { action: "reply" | "replyAll" | "forward"; to: string; html: string; text: string; madeByMailFlow: boolean };
+
+/**
+ * Recovers what the user wrote from a saved draft, leaving out the quoted
+ * original (it is added again when the draft is saved or sent).
+ */
+export function readDraftContent(message: gmail_v1.Schema$Message): DraftContent {
+  const headers = headersOf(message);
+  const marker = headers.get(DRAFT_ACTION_HEADER.toLowerCase()) ?? "";
+  const madeByMailFlow = Boolean(headers.get(DRAFT_SOURCE_HEADER.toLowerCase()));
+  const action = marker === "reply" || marker === "replyAll" || marker === "forward"
+    ? marker
+    : /^\s*fwd?:/i.test(headers.get("subject") ?? "") ? "forward" : headers.get("cc") ? "replyAll" : "reply";
+
+  const plain = bodyOf(message.payload, "text/plain") ?? "";
+  const text = plain.split(/\r?\n\r?\n(?=On [^\r\n]* wrote:|-{5,} ?Forwarded message ?-{5,})/)[0].trim();
+
+  let html = bodyOf(message.payload, "text/html") ?? "";
+  if (html) {
+    const ownQuote = html.indexOf(QUOTE_START);
+    const anyQuote = html.search(/<div class="gmail_quote/i);
+    if (madeByMailFlow && ownQuote >= 0 && html.startsWith(BODY_OPEN)) {
+      // MailFlow wrote this wrapper itself, so it can be removed exactly.
+      html = html.slice(BODY_OPEN.length, ownQuote).replace(/<\/div>$/, "");
+    } else if (anyQuote >= 0) {
+      html = html.slice(0, anyQuote).replace(/(?:<br\s*\/?>\s*)+$/i, "");
+    }
+    html = sanitizeComposedHtml(html);
+  } else {
+    html = textToHtml(text);
+  }
+  return { action, to: action === "forward" ? cleanHeader(headers.get("to") ?? "") : "", html, text: text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), madeByMailFlow };
+}
+
 export type OutgoingInput = { action?: string; to?: string; body?: string; html?: string; draftId?: string };
 type OutgoingFailure = { error: string; status: number };
 
@@ -212,6 +261,11 @@ export async function buildOutgoingMessage(
   const references = cleanHeader(originalHeaders.get("references") ?? "");
   const originalText = plainBody(original.data.payload) ?? original.data.snippet ?? "";
   const threadId = original.data.threadId ?? undefined;
+  // Drafts remember which message they answer and how, so MailFlow can reopen
+  // them in the composer. Sent mail is rebuilt without these headers.
+  const draftMarkers: Record<string, string> = options.draft
+    ? { [DRAFT_SOURCE_HEADER]: cleanHeader(id), [DRAFT_ACTION_HEADER]: input.action }
+    : {};
 
   if (input.action === "reply" || input.action === "replyAll") {
     const to = emailAddress(originalHeaders.get("reply-to") || from);
@@ -225,6 +279,7 @@ export async function buildOutgoingMessage(
       cc = [...new Set(others)].join(", ");
     }
     const raw = rawMessage({
+      ...draftMarkers,
       To: to,
       Cc: cc,
       Subject: encodedHeader(prefixedSubject(subject, "Re:")),
@@ -256,6 +311,7 @@ export async function buildOutgoingMessage(
     };
   }));
   const raw = rawMessage({
+    ...draftMarkers,
     To: to,
     Subject: encodedHeader(prefixedSubject(subject, "Fwd:")),
   }, {

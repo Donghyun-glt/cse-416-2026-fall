@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
-import { MailDetail, formatSender, initials, type Mail } from "./mail-detail";
+import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "./mail-detail";
 
 type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
+// One entry per screen the browser's Back button should return to.
+type HistoryState = { mailflow: true; view: View; mailId: string | null };
 type BulkAction = "archive" | "spam" | "notSpam" | "read" | "unread";
 type View = "briefing" | "inbox" | "all" | "starred" | "sent" | "drafts" | "spam" | "trash";
 
@@ -90,6 +92,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [loading, setLoading] = useState(initialConnected);
   const [error, setError] = useState<string | null>(null);
   const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
+  const [openDraft, setOpenDraft] = useState<{ forId: string; draft: SavedDraft } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkRestoring, setBulkRestoring] = useState(false);
@@ -138,7 +141,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setSelectedMail((current) => {
           if (!current) return null;
           const synced = nextMessages.find((message) => message.id === current.id);
-          return synced ? { ...synced, html: current.html, attachments: current.attachments, partial: current.partial } : current;
+          return synced ? { ...synced, html: current.html, attachments: current.attachments, partial: current.partial, hasDraft: current.hasDraft } : current;
         });
       }
       if (targetView !== "briefing") {
@@ -212,7 +215,20 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   }, [allPageIndex, allPageTokens, connected, loadMessages, view]);
 
   const fullDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
-  const changeView = (next: View) => {
+  // ----- Browser history -----
+  // MailFlow is a single page, so without history entries the browser's Back
+  // button would leave the app. Each mailbox change and each opened message
+  // adds an entry; Back/Forward then restore that screen.
+  const viewRef = useRef(view);
+  const messagesRef = useRef(messages);
+  useEffect(() => { viewRef.current = view; messagesRef.current = messages; }, [messages, view]);
+  const recordHistory = (nextView: View, mailId: string | null, replace = false) => {
+    const state: HistoryState = { mailflow: true, view: nextView, mailId };
+    if (replace) window.history.replaceState(state, "");
+    else window.history.pushState(state, "");
+  };
+
+  const applyView = (next: View) => {
     setView(next);
     setSelectedMail(null);
     setSelectedIds(new Set());
@@ -223,6 +239,18 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       setAllPageIndex(0);
       setNextPageToken(null);
     }
+  };
+  const changeView = (next: View) => {
+    // Clicking the mailbox that is already showing just refreshes it.
+    if (next !== view || selectedMail) recordHistory(next, null);
+    applyView(next);
+  };
+  // Leave an opened message. Going through history keeps Back/Forward in step
+  // with what is on screen; the popstate handler below does the state change.
+  const closeMail = () => {
+    const state = window.history.state as HistoryState | null;
+    if (state?.mailflow && state.mailId) window.history.back();
+    else setSelectedMail(null);
   };
   // Filters change which messages Gmail returns, so paging starts over.
   const toggleFilter = (filter: "attachment" | "unread") => {
@@ -246,7 +274,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setSelectedMail(null);
     setSelectedIds(new Set());
   };
-  const openMessage = (message: Mail) => {
+  const showMessage = (message: Mail) => {
     // Lists carry headers and snippet only. Show those immediately, then load
     // the body; bodies already opened in this session come from the cache.
     const body = bodyCacheRef.current.get(message.id);
@@ -278,6 +306,72 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       setError(readError instanceof Error ? readError.message : "메일을 읽음 처리하지 못했습니다.");
     });
   };
+  const openMessage = (message: Mail) => {
+    if (message.draft) {
+      void openDraftCard(message);
+      return;
+    }
+    // Moving between messages (newer/older) replaces the entry, so one Back returns to the list.
+    recordHistory(view, message.id, Boolean(selectedMail));
+    setOpenDraft(null);
+    showMessage(message);
+  };
+  // A card in Drafts opens the message it answers, with the composer restored,
+  // like Gmail. Drafts that answer nothing MailFlow can find open read-only.
+  const openDraftCard = async (draftMessage: Mail) => {
+    setError(null);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(draftMessage.id)}/draft`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({})) as { sourceId?: string | null; draft?: SavedDraft | null };
+      if (response.ok && data.sourceId && data.draft) {
+        const sourceResponse = await fetch(`/api/gmail/messages/${encodeURIComponent(data.sourceId)}`, { cache: "no-store" });
+        const sourceData = await sourceResponse.json().catch(() => ({})) as { message?: Mail };
+        if (sourceResponse.ok && sourceData.message) {
+          const source = { ...sourceData.message, partial: false, hasDraft: true };
+          bodyCacheRef.current.set(source.id, { html: source.html, attachments: source.attachments });
+          recordHistory(view, source.id, Boolean(selectedMail));
+          setOpenDraft({ forId: source.id, draft: data.draft });
+          setSelectedMail(source);
+          return;
+        }
+      }
+    } catch {
+      // Fall through to the read-only view.
+    }
+    recordHistory(view, draftMessage.id, Boolean(selectedMail));
+    setOpenDraft(null);
+    showMessage(draftMessage);
+  };
+
+  // Kept in a ref so the popstate listener below always runs the latest version.
+  const historyHandlerRef = useRef<(state: HistoryState) => void>(() => {});
+  useEffect(() => {
+    historyHandlerRef.current = (state) => {
+      if (state.view !== viewRef.current) {
+        applyView(state.view);
+        return;
+      }
+      const target = state.mailId ? messagesRef.current.find((message) => message.id === state.mailId) : undefined;
+      setOpenDraft(null);
+      if (target && !target.draft) showMessage(target);
+      else setSelectedMail(null);
+    };
+  });
+
+  // Mark the starting screen, then follow the browser's Back/Forward buttons.
+  useEffect(() => {
+    if (!(window.history.state as HistoryState | null)?.mailflow) {
+      window.history.replaceState({ mailflow: true, view: viewRef.current, mailId: null } satisfies HistoryState, "");
+    }
+    const onPopState = (event: PopStateEvent) => {
+      const state = event.state as HistoryState | null;
+      if (!state?.mailflow) return;
+      historyHandlerRef.current(state);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const toggleSelection = (id: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -343,7 +437,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(selectedMail.id)}`, { method: "DELETE" });
       if (!response.ok) throw new Error("메일을 휴지통으로 이동하지 못했습니다.");
       setMessages((current) => current.filter((message) => message.id !== selectedMail.id));
-      setSelectedMail(null);
+      closeMail();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "메일을 휴지통으로 이동하지 못했습니다.");
     } finally {
@@ -368,7 +462,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         : action === "archive" && view === "all"
           ? current
           : current.filter((message) => message.id !== target.id));
-      setSelectedMail(null);
+      closeMail();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "The action could not be completed.");
     }
@@ -503,7 +597,12 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
             error={error}
             position={selectedPosition.index >= 0 ? selectedPosition.offset + selectedPosition.index + 1 : 0}
             total={view === "briefing" ? messages.length : Math.max(resultSizeEstimate, selectedPosition.offset + messages.length)}
-            onBack={() => setSelectedMail(null)}
+            onBack={closeMail}
+            initialDraft={openDraft?.forId === selectedMail.id ? openDraft.draft : null}
+            onDraftChange={(hasDraft) => {
+              const id = selectedMail.id;
+              setMessages((current) => current.map((message) => message.id === id ? { ...message, hasDraft } : message));
+            }}
             onNewer={selectedPosition.index > 0 ? () => openMessage(messages[selectedPosition.index - 1]) : undefined}
             onOlder={selectedPosition.index >= 0 && selectedPosition.index < messages.length - 1 ? () => openMessage(messages[selectedPosition.index + 1]) : undefined}
             onDelete={view === "trash" ? undefined : () => void moveSelectedMailToTrash()}
@@ -575,7 +674,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
                   {startsGroup && view === "briefing" && <h3 className={`px-5 py-2 text-xs font-extrabold uppercase tracking-wide ${priorityDisplay[message.priority].className}`}>{priorityDisplay[message.priority].label}</h3>}
                   <div className={`flex items-center gap-2 px-4 py-3 transition md:px-5 ${rowTone}`}>
                     {view !== "briefing" && <><input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />{view === "trash" ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[#77736b]"><Icon name="trash" className="h-4 w-4" /></span> : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xl leading-none transition hover:bg-black/5 ${message.starred ? "text-[#e7b928]" : "text-[#aaa79f]"}`}>{message.starred ? "★" : "☆"}</button>}</>}
-                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="shrink-0 text-[#77736b]"><Icon name="paperclip" className="h-4 w-4" /></span>}{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
+                    <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span><span className="min-w-0 flex-1"><span className={`block truncate text-sm ${message.unread ? "font-extrabold" : "font-medium"}`}>{sender}{message.hasDraft && <>, <span className="font-medium text-[#c5221f]">Draft</span></>} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject}</span></span>{message.snippet && <span className="mt-1 block truncate text-sm text-[#8e8b83]">{message.snippet}</span>}</span>{message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="shrink-0 text-[#77736b]"><Icon name="paperclip" className="h-4 w-4" /></span>}{!message.draft && <PriorityBadge priority={message.priority} />}<time className="shrink-0 self-start pt-1 text-xs text-[#96938b]">{formatTime(message.date)}</time></button>
                   </div>
                 </article>;
               })}

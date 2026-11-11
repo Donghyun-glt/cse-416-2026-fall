@@ -22,6 +22,19 @@ export type Mail = {
   attachments: GmailAttachment[];
   /** True while only list data (headers + snippet) is loaded; the body arrives when the message is opened. */
   partial?: boolean;
+  /** True when the message's thread holds an unfinished reply saved in Drafts. */
+  hasDraft?: boolean;
+};
+
+/** A saved draft as returned by GET /api/gmail/messages/[id]/draft. */
+export type SavedDraft = {
+  draftId: string;
+  messageId: string;
+  action: "reply" | "replyAll" | "forward";
+  to: string;
+  html: string;
+  text: string;
+  attachments: { filename: string; mimeType: string; size: number; downloadUrl: string }[];
 };
 
 type ComposeMode = "reply" | "replyAll" | "forward";
@@ -390,12 +403,16 @@ export type MailDetailProps = {
   onArchive?: () => void;
   onSpam?: () => void;
   onNotSpam?: () => void;
+  /** A draft already loaded by the caller (opening a card in Drafts). */
+  initialDraft?: SavedDraft | null;
+  /** Lets the list show or hide its "Draft" marker right away. */
+  onDraftChange?: (hasDraft: boolean) => void;
   onMarkUnread?: () => void;
   onPriorityChange: (priority: Priority) => void;
   onStar: () => void;
 };
 
-export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, onMarkUnread, onPriorityChange, onStar }: MailDetailProps) {
+export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, initialDraft, onDraftChange, onMarkUnread, onPriorityChange, onStar }: MailDetailProps) {
   const sender = formatSender(message.from);
   const address = senderAddress(message.from);
   const visibleAttachments = useMemo(() => message.attachments.filter((attachment) => !attachment.inline), [message.attachments]);
@@ -444,6 +461,13 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   // Latest composer contents, readable from timers and from unmount cleanup
   // (by then the editor element itself is already gone).
   const composerStateRef = useRef<{ mode: ComposeMode | null; body: string; html: string; to: string; files: File[] }>({ mode: null, body: "", html: "", to: "", files: [] });
+  // What was last saved, so reopening a draft (or a no-op render) does not save it again.
+  const savedSignatureRef = useRef("");
+  const pendingHtmlRef = useRef<string | null>(null);
+  const resumedRef = useRef(false);
+  const openedAtRef = useRef(0);
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => { onDraftChangeRef.current = onDraftChange; }, [onDraftChange]);
   const [modeOpen, setModeOpen] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
   const closeMode = useCallback(() => setModeOpen(false), []);
@@ -467,6 +491,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     composerStateRef.current = { mode, body: "", html: "", to: "", files: [] };
     draftIdRef.current = "";
     dirtyRef.current = false;
+    savedSignatureRef.current = "";
     setDraftStatus("");
     setComposeError(null);
     setMoreOpen(false);
@@ -539,6 +564,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const signatureOf = (state: typeof composerStateRef.current) =>
+    JSON.stringify([state.mode, state.to, state.body, state.html, state.files.map((file) => [file.name, file.size, file.lastModified])]);
+
   // Saves run one after another so an older save can never overwrite a newer one.
   const saveDraft = useCallback(() => {
     if (saveTimerRef.current !== null) {
@@ -549,6 +577,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       const state = composerStateRef.current;
       if (!dirtyRef.current || !state.mode || !state.body.trim()) return;
       dirtyRef.current = false;
+      const signature = signatureOf(state);
       setDraftStatus("saving");
       try {
         const form = new FormData();
@@ -562,6 +591,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         const result = await response.json().catch(() => ({})) as { draftId?: string };
         if (!response.ok || !result.draftId) throw new Error("draft_not_saved");
         draftIdRef.current = result.draftId;
+        savedSignatureRef.current = signature;
+        onDraftChangeRef.current?.(true);
         setDraftStatus(dirtyRef.current ? "" : "saved");
       } catch {
         dirtyRef.current = true;
@@ -575,6 +606,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   useEffect(() => {
     composerStateRef.current = { ...composerStateRef.current, mode: composeMode, body, to: forwardTo, files };
     if (!composeMode || !body.trim()) return;
+    if (signatureOf(composerStateRef.current) === savedSignatureRef.current) return;
     dirtyRef.current = true;
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => void saveDraft(), 1500);
@@ -586,6 +618,78 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     if (dirtyRef.current) void saveDraft();
     else if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
   }, [saveDraft]);
+
+  // Reopen a saved draft in the composer, the way Gmail shows the unfinished
+  // reply under the message it answers.
+  useEffect(() => {
+    if (resumedRef.current || message.draft) return;
+    if (!initialDraft && !message.hasDraft) return;
+    resumedRef.current = true;
+    let cancelled = false;
+    let finished = false;
+    void (async () => {
+      try {
+        let draft = initialDraft ?? null;
+        if (!draft) {
+          const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/draft`, { cache: "no-store" });
+          const data = await response.json().catch(() => ({})) as { draft?: SavedDraft | null };
+          draft = response.ok ? data.draft ?? null : null;
+        }
+        // The user may have started writing while the draft was loading; keep what they typed.
+        if (!draft || cancelled || composerStateRef.current.mode) return;
+        const restored = await Promise.all(draft.attachments.map(async (attachment) => {
+          const response = await fetch(attachment.downloadUrl);
+          if (!response.ok) throw new Error("attachment_not_restored");
+          return new File([await response.blob()], attachment.filename, { type: attachment.mimeType });
+        })).catch(() => null);
+        if (cancelled || composerStateRef.current.mode) return;
+        const mode: ComposeMode = draft.action === "replyAll" && !canReplyAll ? "reply" : draft.action;
+        const state = { mode, body: draft.text, html: draft.html, to: draft.to, files: restored ?? [] };
+        composerStateRef.current = state;
+        // If an attachment could not be brought back, leave the draft marked as
+        // changed so the user sees it is not identical to what was saved.
+        savedSignatureRef.current = restored ? signatureOf(state) : "";
+        draftIdRef.current = draft.draftId;
+        dirtyRef.current = false;
+        pendingHtmlRef.current = draft.html;
+        setComposeMode(mode);
+        setForwardTo(draft.to);
+        setBody(draft.text);
+        setFiles(state.files);
+        setDraftStatus("saved");
+        if (!restored) setComposeError("Some attachments from this draft could not be loaded. Attach them again before sending.");
+      } catch {
+        // The message itself still opens normally; the draft stays in Drafts.
+      } finally {
+        finished = true;
+      }
+    })();
+    // If the effect is torn down before it finishes (React re-runs effects in
+    // development), allow the next run to try again.
+    return () => { cancelled = true; if (!finished) resumedRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per opened message; resumedRef guards re-entry.
+  }, [initialDraft, message.hasDraft, message.id]);
+
+  // The editor element only exists once the composer is shown, so restored
+  // content is written into it right after that render.
+  useEffect(() => {
+    if (!composeMode || pendingHtmlRef.current === null || !composerRef.current) return;
+    composerRef.current.innerHTML = pendingHtmlRef.current;
+    pendingHtmlRef.current = null;
+    composerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [composeMode]);
+
+  // Double-clicking a row in the list opens the message on the first click;
+  // the second click then lands on this view and the browser treats it as a
+  // double-click here, selecting the body. Ignore multi-clicks for a moment
+  // after opening, and drop any selection carried over from the list.
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+    window.getSelection()?.removeAllRanges();
+  }, []);
+  useEffect(() => {
+    if (!message.partial && Date.now() - openedAtRef.current < 1000) window.getSelection()?.removeAllRanges();
+  }, [message.partial]);
 
   const discardDraft = async () => {
     if (saveTimerRef.current !== null) {
@@ -601,7 +705,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     await saveChainRef.current;
     const draftId = draftIdRef.current;
     draftIdRef.current = "";
+    savedSignatureRef.current = "";
     if (!draftId) return;
+    onDraftChangeRef.current?.(false);
     try {
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/draft?draftId=${encodeURIComponent(draftId)}`, { method: "DELETE" });
       if (!response.ok) throw new Error("draft_not_discarded");
@@ -699,7 +805,9 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/send`, { method: "POST", body: form });
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(response.status === 413 || result.error === "attachments_too_large" ? `Attachments can be up to ${formatBytes(MAX_ATTACHMENT_BYTES)} in total.` : result.error ?? "Message could not be sent.");
+      if (draftIdRef.current) onDraftChangeRef.current?.(false);
       draftIdRef.current = "";
+      savedSignatureRef.current = "";
       composerStateRef.current = { mode: null, body: "", html: "", to: "", files: [] };
       setDraftStatus("");
       setComposeMode(null);
@@ -756,7 +864,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const pillClass = "flex h-9 items-center gap-2 rounded-full border border-[#747775] bg-white pl-3 pr-4 text-sm font-medium text-[#444746] transition-colors hover:bg-[#f2f2f2] hover:shadow-[0_1px_2px_rgba(60,64,67,.3)]";
 
   return (
-    <section className="flex min-h-screen flex-col bg-white text-[#1f1f1f]" style={{ fontFamily: GMAIL_FONT }}>
+    <section className="flex min-h-screen flex-col bg-white text-[#1f1f1f]" style={{ fontFamily: GMAIL_FONT }}
+      onMouseDownCapture={(event) => { if (event.detail > 1 && Date.now() - openedAtRef.current < 800) event.preventDefault(); }}>
       {/* ---------- Top action toolbar ---------- */}
       <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center bg-white pl-2 pr-3 sm:pl-4">
         <ToolbarButton icon="back" label="Back to Inbox" onClick={onBack} />

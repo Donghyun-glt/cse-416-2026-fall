@@ -58,9 +58,11 @@ function loadRoutes(sent, drafts = []) {
     if (name === "@/lib/google") return { createGoogleOAuthClient: () => ({ setCredentials() {} }) };
     if (name === "@/lib/gmail-session") return { getGmailSession: async () => ({ access_token: "fake" }) };
     if (name === "@/lib/outgoing-mail") return outgoingMail;
+    if (name === "@/lib/gmail-message") return { parseGmailMessage: () => ({ attachments: [] }) };
     throw new Error(`Unexpected import: ${name}`);
   };
   return {
+    outgoingMail,
     send: loadTypeScript("src/app/api/gmail/messages/[id]/send/route.ts", requireFn),
     draft: loadTypeScript("src/app/api/gmail/messages/[id]/draft/route.ts", requireFn),
   };
@@ -142,6 +144,24 @@ test("uploads over the size limit are rejected before anything is sent", async (
   assert.equal(sent.length, 0);
 });
 
+// Turns a raw MIME message back into the nested shape the Gmail API returns.
+function parseRaw(raw) {
+  const parseEntity = (entity) => {
+    const split = entity.indexOf("\r\n\r\n");
+    const head = entity.slice(0, split);
+    const body = entity.slice(split + 4);
+    const headers = head.split("\r\n").map((line) => ({ name: line.slice(0, line.indexOf(":")), value: line.slice(line.indexOf(":") + 2) }));
+    const type = headers.find((item) => item.name === "Content-Type")?.value ?? "text/plain";
+    const boundary = type.match(/boundary="([^"]+)"/)?.[1];
+    if (boundary) {
+      const parts = body.split(`--${boundary}`).slice(1, -1).map((part) => parseEntity(part.replace(/^\r\n/, "").replace(/\r\n$/, "")));
+      return { mimeType: type.split(";")[0], headers, parts };
+    }
+    return { mimeType: type.split(";")[0], headers, body: { data: Buffer.from(body.replace(/\r\n/g, ""), "base64").toString("base64url") } };
+  };
+  return { id: "draft-message", payload: parseEntity(raw) };
+}
+
 function draftRequest(fields, method = "POST", query = "") {
   const init = { method, headers: { cookie: "gmail_session=valid" } };
   if (fields) {
@@ -155,7 +175,9 @@ function draftRequest(fields, method = "POST", query = "") {
 test("an unfinished reply is saved as a Gmail draft in the original thread, then updated in place", async () => {
   const sent = [];
   const drafts = [];
-  const route = loadRoutes(sent, drafts).draft;
+  const routes = loadRoutes(sent, drafts);
+  const route = routes.draft;
+  const outgoingMailOf = () => routes.outgoingMail;
 
   const created = await route.POST(draftRequest({ action: "reply", body: "First thoughts", html: "<b>First</b> thoughts" }), context);
   assert.equal(created.status, 200);
@@ -163,8 +185,17 @@ test("an unfinished reply is saved as a Gmail draft in the original thread, then
   assert.equal(drafts[0][0], "create");
   assert.equal(drafts[0][1].requestBody.message.threadId, "t1");
   const raw = Buffer.from(drafts[0][1].requestBody.message.raw, "base64url").toString("utf8");
-  assert.match(raw, /^To: alex@example\.com\r\n/);
+  assert.match(raw, /^To: alex@example\.com\r$/m);
   assert.match(raw, /Subject: Re: Project update/);
+  // Drafts record what they answer so MailFlow can reopen them in the composer.
+  assert.match(raw, /^X-MailFlow-Source: m1\r$/m);
+  assert.match(raw, /^X-MailFlow-Action: reply\r$/m);
+
+  // Reading the draft back returns only what the user wrote, not the quoted original.
+  const content = outgoingMailOf(route).readDraftContent(parseRaw(raw));
+  assert.equal(content.action, "reply");
+  assert.equal(content.html, "<b>First</b> thoughts");
+  assert.equal(content.text, "First thoughts");
 
   const updated = await route.POST(draftRequest({ action: "reply", body: "Second thoughts", draftId: "d1" }), context);
   assert.equal((await updated.json()).draftId, "d1");
@@ -181,6 +212,7 @@ test("a forward can be saved as a draft before a recipient is entered, but not s
   const raw = Buffer.from(drafts[0][1].requestBody.message.raw, "base64url").toString("utf8");
   assert.doesNotMatch(raw, /^To:/m);
   assert.match(raw, /Subject: Fwd: Project update/);
+  assert.match(raw, /^X-MailFlow-Action: forward\r$/m);
 
   const form = new FormData();
   form.set("action", "forward");

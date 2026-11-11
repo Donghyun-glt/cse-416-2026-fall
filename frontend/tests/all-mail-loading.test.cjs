@@ -13,8 +13,9 @@ test("All Emails preserves Gmail order while attaching database priorities", asy
       getProfile: async () => ({ data: { emailAddress: "demo@example.com" } }),
       messages: {
         list: async () => ({ data: { messages: [{ id: "new-low" }, { id: "old-urgent" }], nextPageToken: "next", resultSizeEstimate: 2000 } }),
-        get: async ({ id }) => ({ data: { id, labelIds: [], snippet: "", payload: { headers: [] } } }),
+        get: async ({ id }) => ({ data: { id, threadId: `thread-${id}`, labelIds: [], snippet: "", payload: { headers: [] } } }),
       },
+      drafts: { list: async () => ({ data: { drafts: [{ id: "d1", message: { id: "draft-message", threadId: "thread-old-urgent" } }] } }) },
     },
   };
   const source = readFileSync(resolve(__dirname, "../src/app/api/gmail/messages/route.ts"), "utf8");
@@ -50,5 +51,7 @@ test("All Emails preserves Gmail order while attaching database priorities", asy
   assert.equal("sortingPending" in body, false);
   assert.equal(body.nextPageToken, "next");
   assert.deepEqual(body.messages.map((message) => message.partial), [true, true]);
+  // Only the message whose thread holds an unfinished reply is marked.
+  assert.deepEqual(body.messages.map((message) => message.hasDraft), [false, true]);
   assert.deepEqual(body.messages.map((message) => message.html), ["", ""]);
 });
