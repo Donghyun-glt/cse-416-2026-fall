@@ -235,23 +235,25 @@ function FileBadge({ kind, className = "h-5 w-5" }: { kind: FileKind; className?
 // Email body (sandboxed iframe that grows with its content)
 // ---------------------------------------------------------------------------
 
-function EmailBody({ html, inert, onReady }: { html: string; inert?: boolean; onReady?: () => void }) {
+function EmailBody({ html, inert, onReady, placeholder }: { html: string; inert?: boolean; onReady?: () => void; placeholder?: ReactNode }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   const [height, setHeight] = useState(120);
+  // The body stays hidden until its real height is known, so it is never
+  // shown squeezed into the starting box with its own scrollbar.
+  const [measured, setMeasured] = useState(false);
+  const onReadyRef = useRef(onReady);
+  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
   const syncHeight = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
     if (doc) setHeight(Math.max(60, doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0));
   }, []);
-  const onReadyRef = useRef(onReady);
-  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
   const handleLoad = useCallback(() => {
-    syncHeight();
     const doc = frameRef.current?.contentDocument;
-    if (!doc?.body) return;
-    // The body is laid out at its real height now, so things placed below it
-    // (the restored draft) will not jump when it appears.
-    onReadyRef.current?.();
+    // Ignore the empty page a new iframe starts with; wait for the message itself.
+    if (!doc?.body || doc.URL === "about:blank") return;
+    syncHeight();
+    setMeasured(true);
     observerRef.current?.disconnect();
     observerRef.current = new ResizeObserver(syncHeight);
     observerRef.current.observe(doc.body);
@@ -260,11 +262,34 @@ function EmailBody({ html, inert, onReady }: { html: string; inert?: boolean; on
   }, [syncHeight]);
   // srcdoc can finish loading before React attaches onLoad (fast/cached
   // renders), in which case the iframe would stay at its initial height.
+  // A new iframe first holds an empty about:blank page that also reports
+  // "complete"; only the real message document (about:srcdoc) counts.
   useEffect(() => {
-    if (frameRef.current?.contentDocument?.readyState === "complete") handleLoad();
+    const doc = frameRef.current?.contentDocument;
+    if (doc?.readyState === "complete") handleLoad();
     return () => observerRef.current?.disconnect();
   }, [handleLoad, html]);
-  return <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-transparent" style={{ height, pointerEvents: inert ? "none" : undefined }} />;
+  // If the load event never arrives, show the body anyway rather than leaving it hidden.
+  useEffect(() => {
+    if (measured) return;
+    const timeout = window.setTimeout(() => { syncHeight(); setMeasured(true); }, 2000);
+    return () => window.clearTimeout(timeout);
+  }, [measured, syncHeight]);
+  // Tell the parent only after the measured height has been rendered.
+  useEffect(() => {
+    if (measured) onReadyRef.current?.();
+  }, [measured]);
+  return (
+    <div className="relative">
+      {!measured && placeholder}
+      {/* scrolling="no": the frame is always as tall as its content, so it never needs its own scrollbar. */}
+      <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" scrolling="no" aria-busy={!measured}
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-transparent"
+        style={measured
+          ? { height, overflow: "hidden", pointerEvents: inert ? "none" : undefined }
+          : { height, overflow: "hidden", position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" }} />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -910,7 +935,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         </span>
         {deleting && <span className="ml-2 text-xs text-[#5e5e5e]">Deleting…</span>}
         <span className="ml-auto flex items-center gap-1">
-          {total > 0 && <span className="mr-2 hidden whitespace-nowrap text-xs text-[#444746] sm:inline">{position.toLocaleString("en-US")} of {total.toLocaleString("en-US")}</span>}
+          {total > 0 && position > 0 && <span className="mr-2 hidden whitespace-nowrap text-xs text-[#444746] sm:inline">{position.toLocaleString("en-US")} of {total.toLocaleString("en-US")}</span>}
           <ToolbarButton icon="chevronLeft" label="Newer" onClick={onNewer} disabled={!onNewer} />
           <ToolbarButton icon="chevronRight" label="Older" onClick={onOlder} disabled={!onOlder} />
         </span>
@@ -995,9 +1020,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
         {/* ---------- Body ---------- */}
         <div className="pl-4 pr-4 pt-4 sm:pl-[72px] sm:pr-6">
-          {message.partial
-            ? <p className="py-6 text-sm leading-6 text-[#5e5e5e]" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-[#9a9a9a]">Loading message…</span></p>
-            : <EmailBody html={message.html} inert={settling} onReady={markBodyReady} />}
+          {(() => {
+            // Shown while the message is being fetched and while its body is being laid out.
+            const loadingBody = <p className="py-6 text-sm leading-6 text-[#5e5e5e]" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-[#9a9a9a]">Loading message…</span></p>;
+            return message.partial ? loadingBody : <EmailBody html={message.html} inert={settling} onReady={markBodyReady} placeholder={loadingBody} />;
+          })()}
         </div>
 
         {/* ---------- Attachments ---------- */}
