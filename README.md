@@ -62,37 +62,144 @@ When the user opens an email, MailFlow AI provides:
 - Adds the approved event to **Google Calendar**.
 
 ## Tech Stack
+
+MailFlow AI is one Next.js application: the React interface and the backend API routes live in the same codebase under `frontend/`. The earlier plan for a separate NestJS backend was dropped, as recorded in the Software Design Document.
+
+| Layer | Choice |
+| --- | --- |
+| Interface | React 19, Tailwind CSS 4 |
+| Application framework and backend API | Next.js 16 route handlers, TypeScript |
+| Runtime | Node.js 22 LTS |
+| Database | PostgreSQL (managed, e.g. Neon) through `pg` |
+| Google integration | `googleapis` (OAuth 2.0, Gmail API v1) |
+| AI | Google Gemini API (`gemini-3.5-flash-lite` by default) |
+| Hosting | Vercel |
+
+## Live Beta
+
+<!-- TODO(team): paste the production URL here once the Vercel deployment is verified. -->
+Deployed on Vercel: **URL to be added**
+
+## Developer Setup
+
+These instructions are written for **Windows 10/11 (PowerShell)** and **macOS / Linux (bash or zsh)**. The commands are the same on every system unless a step shows two variants.
+
+### Prerequisites
+
+- [Node.js 22 LTS](https://nodejs.org/) (includes npm 10) and Git
+- A PostgreSQL database. A free [Neon](https://neon.tech/) project is the simplest option; a local PostgreSQL 17 server also works.
+- A Google Cloud project with the Gmail API enabled and a web OAuth client. See [frontend/README.md](frontend/README.md) for the step-by-step setup.
+- A Google Gemini API key from [Google AI Studio](https://aistudio.google.com) (the free tier is enough).
+
+Team members can ask a teammate for the shared development credentials instead of creating new ones.
+
+### 1. Check out the source
+
+`main` is the stable branch. Features are merged into it only after they work.
+
+```bash
+git clone https://github.com/Donghyun-glt/cse-416-2026-fall.git
+cd cse-416-2026-fall
+git checkout main
+git pull
 ```
-Next.js Frontend
- ├─ Daily Briefing
- ├─ Inbox / Email Detail
- ├─ Reply Editor + Tone/Length sliders
- └─ Calendar Event Preview
 
-NestJS Backend
- ├─ Auth Module (Google OAuth)
- ├─ Gmail Module
- ├─ AI Module (summary, priority, reply, date extraction)
- ├─ Calendar Module
- └─ User / Draft / Approval Module
- ```
-
-## Run locally
+### 2. Install dependencies
 
 ```bash
 npm --prefix frontend install
+```
+
+### 3. Configure environment variables
+
+Copy the example file, then fill it in.
+
+```powershell
+# Windows (PowerShell)
+Copy-Item .env.example frontend\.env.local
+```
+
+```bash
+# macOS / Linux
+cp .env.example frontend/.env.local
+```
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth web client |
+| `GOOGLE_REDIRECT_URI` | Yes | `http://localhost:3000/api/google/callback` for local development. It must also be registered in the Google Cloud console. |
+| `DATABASE_URL` | Yes | PostgreSQL connection string, e.g. `postgresql://user:password@host/database?sslmode=require` |
+| `SESSION_SECRET` | Yes | Long random value used to encrypt stored Google tokens |
+| `GEMINI_API_KEY` | Yes, for AI replies | Gemini API key |
+| `GEMINI_MODEL` | No | Overrides the default model |
+| `DATABASE_POOL_MAX` | No | Connection-pool limit (default 5) |
+
+Generate a `SESSION_SECRET` on any system with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Never commit `frontend/.env.local`; it is ignored by Git.
+
+### 4. Set up the database
+
+Create an empty PostgreSQL database (in Neon: create a project and copy its connection string into `DATABASE_URL`). Then apply the migrations in `frontend/db/migrations/`:
+
+```bash
+cd frontend
+node --env-file=.env.local scripts/migrate-db.mjs
+cd ..
+```
+
+The script is safe to run again; it skips migrations that are already applied. To inspect stored classifications later, run `node --env-file=.env.local scripts/inspect-db.mjs` from `frontend/`.
+
+### 5. Build
+
+```bash
+npm --prefix frontend run build
+```
+
+### 6. Run locally
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000. Google sign-in also requires the OAuth settings described in [frontend/README.md](frontend/README.md).
+Open http://localhost:3000 and click **Log in with Google**. Use `localhost`, not the LAN IP that Next.js prints, because the OAuth callback must return to the origin that started the login. While the Google app is in Testing mode, your Google account must be on the OAuth test-user list.
 
-### Data Design + Web Views assignment
+To run the production build instead of the dev server: `npm --prefix frontend run start`.
 
-Open [http://localhost:3000/demo](http://localhost:3000/demo) for the interactive, sample-data UI draft. It covers the daily briefing, email list and detail, AI summary and editable reply, send confirmation, event preview, calendar, and manual compose. This preview does not call Gmail or Google Calendar, and its confirmation buttons do not perform external actions.
+### 7. Test
 
-The demo keeps its four view controls in a vertical navigation rail at the right side of the screen. The rest of the app remains independent of this preview.
+```bash
+npm --prefix frontend test
+npm --prefix frontend run lint
+```
 
-The relational design is in [Documents/MailFlowAI-DataDesign.pdf](Documents/MailFlowAI-DataDesign.pdf). The contribution section is based on the shared repository's commit history; the team should review it before submission.
+`npm test` runs the unit tests in `frontend/tests/` with the Node.js test runner. They use mocked Google and database services, so they need no credentials and no running database. Run the tests, the linter, and the build before pushing to `main`.
+
+To check the full flow by hand: log in, open the Daily Briefing, open a message, generate a reply draft, and send a reply to yourself.
+
+## Bugs and Issues
+
+We track bugs with **GitHub Issues**: https://github.com/Donghyun-glt/cse-416-2026-fall/issues
+
+- **See outstanding bugs:** open the link above; open issues with the `bug` label are the current known bugs.
+- **Report a bug:** click **New issue** and include what you did, what you expected, what happened, your browser and operating system, and a screenshot if it helps. Do not paste email contents or credentials.
+- Serious bugs are assigned to a team member and scheduled on the Jira board.
+
+## Documentation
+
+- [Backend API](Documents/API_Design/API.md)
+- [Software Design Document](Documents/Software_design/MailFlowAI-SoftwareDesign.docx)
+- [Data Design](Documents/Data_Design/MailFlowAI-DataDesign.docx)
+- [Milestone 4 Progress Update](Documents/Milestone4/Milestone4_Progress_Update.md)
+- Schedule: the Jira board linked above
+
+### Sample-data preview
+
+http://localhost:3000/demo shows the interactive UI draft from the Data Design + Web Views assignment. It uses fixed sample data, does not call Gmail or Google Calendar, and its confirmation buttons perform no external action.
 
 ## What Makes It Different?
 
