@@ -12,6 +12,13 @@
   --font-mono: "Cascadia Code", Consolas, monospace;
 }
 
+/* Always keep room for the page scrollbar. Without this, the scrollbar
+   appears only once a message is tall enough to scroll, which narrows the
+   page by its width and nudges every column sideways. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
