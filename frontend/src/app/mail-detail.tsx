@@ -393,7 +393,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   );
   const [replyAll, setReplyAll] = useState(false);
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
-  const suggestionRef = useRef<HTMLTextAreaElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -732,7 +731,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
             {(suggestion.status === "loading" || suggestion.status === "ready" || suggestion.status === "error") && (
               <>
                 <div className="relative rounded-xl border border-[#e3e3e3] bg-[#fbfbfb]">
-                  <textarea ref={suggestionRef} value={suggestion.draft} onChange={(event) => setSuggestion((current) => ({ ...current, draft: event.target.value }))}
+                  <textarea value={suggestion.draft} onChange={(event) => setSuggestion((current) => ({ ...current, draft: event.target.value }))}
                     rows={10} aria-label="Suggested reply" disabled={suggestion.status === "loading"} placeholder={suggestion.status === "error" ? "" : "Generating a reply with AI…"}
                     className="block min-h-[220px] w-full resize-y rounded-xl bg-transparent px-4 py-3 text-sm leading-6 text-[#1f1f1f] outline-none focus:ring-2 focus:ring-[#5b4bd6]/30 disabled:text-[#9a9a9a]" />
                   {suggestion.status === "loading" && <span className="pointer-events-none absolute right-3 top-3 h-4 w-4 animate-spin rounded-full border-2 border-[#5b4bd6]/30 border-t-[#5b4bd6]" aria-hidden="true" />}
@@ -765,8 +764,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                     className="flex h-10 items-center gap-2 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">
                     <GIcon name="sparkle" className="h-4 w-4" />Regenerate
                   </button>
-                  <button type="button" onClick={() => suggestionRef.current?.focus()} disabled={suggestion.status !== "ready"}
-                    className="h-10 rounded-lg px-3 text-sm font-semibold text-[#5e5e5e] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">Edit manually</button>
                   <button type="button" onClick={() => void sendSuggestion()} disabled={suggestion.status !== "ready" || !suggestion.draft.trim() || sendingSuggestion}
                     className="ml-auto flex h-10 items-center gap-2 rounded-lg bg-[#5b4bd6] px-4 text-sm font-semibold text-white hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">
                     <GIcon name="forward" className="h-4 w-4" />{sendingSuggestion ? "Sending…" : "Send reply"}
@@ -779,13 +776,20 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       )}
       </div>
 
-      {/* ---------- Fixed bottom action bar (Reply / Reply all / Forward) ---------- */}
-      {!composeMode && !message.draft && (
-        <div className="sticky bottom-0 z-20 border-t border-[#f1f1f1] bg-white/95 backdrop-blur-sm lg:static lg:border-0 lg:bg-[#f6f8fc]">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-4 sm:gap-3 sm:pl-[72px]">
-            <button type="button" onClick={() => openComposer("reply")} className={pillClass}><GIcon name="reply" />Reply</button>
+      {/* ---------- Bottom action bar: stays pinned to the bottom of the screen while the message scrolls.
+          Reply here always opens a blank composer, independent of the AI suggestion. ---------- */}
+      {!composeMode && (!message.draft || onDelete) && (
+        <div className="sticky bottom-0 z-20 border-t border-[#e3e3e3] bg-white/95 shadow-[0_-1px_4px_rgba(60,64,67,.08)] backdrop-blur-sm">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:pl-[72px] lg:pl-[96px] lg:pr-6">
+            {!message.draft && <button type="button" onClick={() => openComposer("reply")} className={pillClass}><GIcon name="reply" />Reply</button>}
             {canReplyAll && <button type="button" onClick={() => openComposer("replyAll")} className={pillClass}><GIcon name="replyAll" />Reply all</button>}
-            <button type="button" onClick={() => openComposer("forward")} className={pillClass}><GIcon name="forward" />Forward</button>
+            {!message.draft && <button type="button" onClick={() => openComposer("forward")} className={pillClass}><GIcon name="forward" />Forward</button>}
+            {onDelete && (
+              <button type="button" onClick={onDelete} disabled={deleting}
+                className={`${pillClass} ml-auto hover:border-[#b3261e] hover:bg-[#fce8e6] hover:text-[#b3261e] disabled:cursor-not-allowed disabled:opacity-50`}>
+                <GIcon name="trash" />{deleting ? "Deleting…" : "Trash"}
+              </button>
+            )}
           </div>
         </div>
       )}
