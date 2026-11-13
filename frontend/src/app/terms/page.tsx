@@ -23,6 +23,7 @@ export default function TermsOfService() {
           MailFlow shows the messages in your Gmail inbox and sorts them by priority. It can also mark messages as
           read, star them, move them to Trash, and restore them from Trash. MailFlow stores its priority categories
           separately and changes your Gmail mailbox only when you request an action in the app.
+          The Calendar screen shows events from your primary Google Calendar and creates an event there when you submit the event form.
         </p>
       </section>
 

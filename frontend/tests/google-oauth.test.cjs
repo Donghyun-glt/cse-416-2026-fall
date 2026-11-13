@@ -32,11 +32,13 @@ function handler(route, configured = true) {
     process: { env: configured ? {
       NODE_ENV: "production", GOOGLE_CLIENT_ID: "app-client",
       GOOGLE_CLIENT_SECRET: "app-secret", GOOGLE_REDIRECT_URI: "https://mailflow.test/api/google/callback",
+      DATABASE_URL: "postgresql://example.test/db", SESSION_SECRET: "test-secret",
     } : {} },
     require(name) {
       if (name === "@/lib/google") return {
         createGoogleOAuthClient: () => client,
         GMAIL_MODIFY_SCOPE: "https://www.googleapis.com/auth/gmail.modify",
+        CALENDAR_EVENTS_SCOPE: "https://www.googleapis.com/auth/calendar.events",
         GOOGLE_PROFILE_SCOPES: ["openid", "email", "profile"],
       };
       if (name === "@/lib/gmail-session") return {
@@ -65,6 +67,7 @@ test("login requests account selection, Gmail consent, and offline access", asyn
   assert.equal(options.prompt, "select_account consent");
   assert.equal(options.access_type, "offline");
   assert.ok(options.scope.includes("https://www.googleapis.com/auth/gmail.modify"));
+  assert.ok(options.scope.includes("https://www.googleapis.com/auth/calendar.events"));
   assert.equal(response.cookies.get("gmail_oauth_state").value, options.state);
   assert.equal(response.cookies.get("gmail_oauth_popup").value, "1");
   assert.match(response.headers.get("set-cookie"), /HttpOnly/);

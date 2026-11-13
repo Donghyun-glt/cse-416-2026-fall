@@ -9,7 +9,7 @@ Users do not create Google Cloud projects or edit environment files.
 
 The MailFlow team configures one application OAuth client per environment:
 
-1. Create a Google Cloud project and enable Gmail API.
+1. Create a Google Cloud project and enable Gmail API and Google Calendar API.
 2. Configure the Google Auth Platform consent screen and a web OAuth client.
 3. Register the exact callback URL, such as
    `https://your-domain.com/api/google/callback`.
@@ -23,7 +23,10 @@ For local development, copy the repository's `.env.example` to
 `http://localhost:3000/api/google/callback` with Google. Developers running a
 local server need the application configuration; users of the hosted app do not.
 
-The app requests `openid`, `email`, `profile`, and `gmail.modify`. In Google's
+The app requests `openid`, `email`, `profile`, `gmail.modify`, and `calendar.events`.
+Existing users must reconnect Google once to grant the new calendar permission.
+The Calendar screen reads events from the user's primary calendar and saves new
+events there only after the user submits the event form. In Google's
 Testing mode, add your demo users to the test-user list; Gmail authorizations
 expire after seven days. A public launch requires the applicable restricted-scope
 verification and security assessment. See

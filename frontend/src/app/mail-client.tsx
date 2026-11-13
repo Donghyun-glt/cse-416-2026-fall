@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
+import { GoogleCalendar } from "./google-calendar";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
 import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "./mail-detail";
 
@@ -11,7 +12,7 @@ type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: b
 // One entry per screen the browser's Back button should return to.
 type HistoryState = { mailflow: true; view: View; mailId: string | null };
 type BulkAction = "archive" | "spam" | "notSpam" | "read" | "unread";
-type View = "briefing" | "inbox" | "all" | "starred" | "sent" | "drafts" | "spam" | "trash";
+type View = "briefing" | "calendar" | "inbox" | "all" | "starred" | "sent" | "drafts" | "spam" | "trash";
 
 const priorityDisplay: Record<Priority, { label: string; className: string }> = {
   urgent: { label: "Urgent", className: "bg-[#fce9e9] text-[#a82f35]" },
@@ -110,6 +111,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const bodyCacheRef = useRef(new Map<string, Pick<Mail, "html" | "attachments">>());
 
   const loadMessages = useCallback(async (targetView: View, showLoading = false, pageToken = "") => {
+    if (targetView === "calendar") return;
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
@@ -129,7 +131,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         setMessages([]);
         return;
       }
-      if (!response.ok) throw new Error(data.error ?? "메일을 불러오지 못했습니다.");
+      if (!response.ok) throw new Error(data.error ?? "Could not load messages.");
       const nextMessages = data.messages ?? [];
       setConnected(true);
       setMessages(nextMessages);
@@ -150,7 +152,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       }
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-      setError(loadError instanceof Error ? loadError.message : "알 수 없는 오류가 발생했습니다.");
+      setError(loadError instanceof Error ? loadError.message : "An unknown error occurred.");
     } finally {
       if (requestRef.current === controller) {
         requestRef.current = null;
@@ -202,7 +204,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   useEffect(() => () => requestRef.current?.abort(), []);
 
   useEffect(() => {
-    if (!connected) return;
+    if (!connected || view === "calendar") return;
     const pageToken = view === "briefing" ? "" : allPageTokens[allPageIndex];
     const syncCurrentMailbox = () => {
       if (requestRef.current) return;
@@ -285,13 +287,13 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       void fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}`, { cache: "no-store" })
         .then(async (response) => {
           const data = await response.json().catch(() => ({})) as { message?: Mail };
-          if (!response.ok || !data.message) throw new Error("메일 내용을 불러오지 못했습니다.");
+          if (!response.ok || !data.message) throw new Error("Could not load the message.");
           const loaded = { html: data.message.html, attachments: data.message.attachments };
           bodyCacheRef.current.set(message.id, loaded);
           setSelectedMail((current) => current?.id === message.id ? { ...current, ...loaded, partial: false } : current);
         })
         .catch((bodyError: unknown) => {
-          setError(bodyError instanceof Error ? bodyError.message : "메일 내용을 불러오지 못했습니다.");
+          setError(bodyError instanceof Error ? bodyError.message : "Could not load the message.");
         });
     }
     if (!message.unread) return;
@@ -301,9 +303,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "read" }),
     }).then((response) => {
-      if (!response.ok) throw new Error("메일을 읽음 처리하지 못했습니다.");
+      if (!response.ok) throw new Error("Could not mark the message as read.");
     }).catch((readError: unknown) => {
-      setError(readError instanceof Error ? readError.message : "메일을 읽음 처리하지 못했습니다.");
+      setError(readError instanceof Error ? readError.message : "Could not mark the message as read.");
     });
   };
   const openMessage = (message: Mail) => {
@@ -397,14 +399,14 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "star", starred }),
       });
-      if (!response.ok) throw new Error("별표 상태를 저장하지 못했습니다.");
+      if (!response.ok) throw new Error("Could not update the star.");
       if (view === "starred" && !starred) {
         setMessages((current) => current.filter((item) => item.id !== message.id));
       }
     } catch (starError) {
       setMessages((current) => current.map((item) => item.id === message.id ? { ...item, starred: message.starred } : item));
       setSelectedMail((current) => current?.id === message.id ? { ...current, starred: message.starred } : current);
-      setError(starError instanceof Error ? starError.message : "별표 상태를 저장하지 못했습니다.");
+      setError(starError instanceof Error ? starError.message : "Could not update the star.");
     }
   };
   const changePriority = async (priority: Priority) => {
@@ -435,11 +437,11 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setError(null);
     try {
       const response = await fetch(`/api/gmail/messages/${encodeURIComponent(selectedMail.id)}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("메일을 휴지통으로 이동하지 못했습니다.");
+      if (!response.ok) throw new Error("Could not move the message to Trash.");
       setMessages((current) => current.filter((message) => message.id !== selectedMail.id));
       closeMail();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "메일을 휴지통으로 이동하지 못했습니다.");
+      setError(deleteError instanceof Error ? deleteError.message : "Could not move the message to Trash.");
     } finally {
       setDeleting(false);
     }
@@ -481,9 +483,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       const failedIds = results.filter((result) => !result.ok).map((result) => result.id);
       setMessages((current) => current.filter((message) => !movedIds.has(message.id)));
       setSelectedIds(new Set(failedIds));
-      if (failedIds.length > 0) throw new Error(`${failedIds.length}개의 메일을 휴지통으로 이동하지 못했습니다.`);
+      if (failedIds.length > 0) throw new Error(`${failedIds.length} messages could not be moved to Trash.`);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "선택한 메일을 휴지통으로 이동하지 못했습니다.");
+      setError(deleteError instanceof Error ? deleteError.message : "Could not move the selected messages to Trash.");
     } finally {
       setBulkDeleting(false);
     }
@@ -538,9 +540,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       const failedIds = results.filter((result) => !result.ok).map((result) => result.id);
       setMessages((current) => current.filter((message) => !restoredIds.has(message.id)));
       setSelectedIds(new Set(failedIds));
-      if (failedIds.length > 0) throw new Error(`${failedIds.length}개의 메일을 All Emails로 이동하지 못했습니다.`);
+      if (failedIds.length > 0) throw new Error(`${failedIds.length} messages could not be moved to All Emails.`);
     } catch (restoreError) {
-      setError(restoreError instanceof Error ? restoreError.message : "선택한 메일을 All Emails로 이동하지 못했습니다.");
+      setError(restoreError instanceof Error ? restoreError.message : "Could not move the selected messages to All Emails.");
     } finally {
       setBulkRestoring(false);
     }
@@ -571,7 +573,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#5944d8] text-white"><Icon name="mail" className="h-[18px] w-[18px]" /></span><span className="text-lg font-extrabold tracking-tight">MailFlow AI</span></div>
           <nav className="flex gap-1 lg:mt-9 lg:block lg:space-y-1.5" aria-label="Mailbox">
             <button type="button" onClick={() => changeView("briefing")} className={`flex items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "briefing" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="sun" /><span className="hidden sm:inline">Daily Briefing</span></button>
-            <span className="hidden items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold text-[#aaa69c] lg:flex"><Icon name="calendar" />Calendar</span>
+            <button type="button" onClick={() => changeView("calendar")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "calendar" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="calendar" /><span className="hidden sm:inline">Calendar</span></button>
             <button type="button" onClick={() => changeView("inbox")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "inbox" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="inbox" /><span className="hidden sm:inline">Inbox</span></button>
             <button type="button" onClick={() => changeView("starred")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "starred" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="star" /><span className="hidden sm:inline">Starred</span></button>
             <button type="button" onClick={() => changeView("sent")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "sent" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="sent" /><span className="hidden sm:inline">Sent</span></button>
@@ -615,9 +617,10 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           />
         ) : (
           <>
-        <header className="border-b border-[#e4e2dd] bg-white px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "starred" ? "Starred" : view === "sent" ? "Sent" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : view === "inbox" ? "Inbox" : view === "spam" ? "Spam" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-[#9a968c]">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}</div></header>
+        <header className="border-b border-[#e4e2dd] bg-white px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "calendar" ? "Calendar" : view === "starred" ? "Starred" : view === "sent" ? "Sent" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : view === "inbox" ? "Inbox" : view === "spam" ? "Spam" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-[#9a968c]">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}</div></header>
 
         <div className="mx-auto max-w-[1200px] space-y-5 px-5 py-6 md:px-9">
+          {view === "calendar" ? <GoogleCalendar /> : <>
           {view === "briefing" && <TodayCard />}
           <section>
             <div className="mb-3">{view === "briefing" && <h2 className="text-base font-extrabold">Today&apos;s emails</h2>}<p className="mt-0.5 text-xs text-[#9a968c]">{loading ? "Syncing your inbox…" : view === "briefing" ? `${messages.length} message${messages.length === 1 ? "" : "s"} · Updates automatically` : `Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`}</p></div>
@@ -680,6 +683,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
               })}
             </div>
           </section>
+          </>}
         </div>
           </>
         )}

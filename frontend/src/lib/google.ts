@@ -6,6 +6,9 @@ export const GMAIL_READONLY_SCOPE =
 export const GMAIL_MODIFY_SCOPE =
   "https://www.googleapis.com/auth/gmail.modify";
 
+export const CALENDAR_EVENTS_SCOPE =
+  "https://www.googleapis.com/auth/calendar.events";
+
 export const GOOGLE_PROFILE_SCOPES = ["openid", "email", "profile"];
 
 export function createGoogleOAuthClient() {

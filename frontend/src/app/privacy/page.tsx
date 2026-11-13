@@ -52,11 +52,11 @@ export default function PrivacyPolicy() {
             automatic rules assigned it, a short fixed explanation (for example, &quot;A direct request includes
             time-sensitive language&quot;), and a history of priority changes.
           </li>
-          <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used only to make Gmail requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
+          <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used to make Gmail and Google Calendar requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>
           We do not store message subjects, bodies or attachments. Messages are fetched from Gmail when you open the
-          app and are not kept afterwards.
+          app and are not kept afterwards. Calendar events are fetched when you open the Calendar screen and are not stored in our database.
         </p>
       </section>
 

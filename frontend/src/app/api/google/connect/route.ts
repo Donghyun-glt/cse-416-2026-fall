@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   createGoogleOAuthClient,
+  CALENDAR_EVENTS_SCOPE,
   GMAIL_MODIFY_SCOPE,
   GOOGLE_PROFILE_SCOPES,
 } from "@/lib/google";
@@ -14,12 +15,17 @@ export async function GET(request: NextRequest) {
     url.searchParams.set("error", "oauth_not_configured");
     return NextResponse.redirect(url);
   }
+  if (!process.env.DATABASE_URL?.trim() || !process.env.SESSION_SECRET?.trim()) {
+    const url = new URL(popup ? "/auth/google/complete" : "/", request.url);
+    url.searchParams.set("error", "storage_not_configured");
+    return NextResponse.redirect(url);
+  }
   const oauth2Client = createGoogleOAuthClient();
   const authorizationUrl = oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "select_account consent",
     include_granted_scopes: true,
-    scope: [GMAIL_MODIFY_SCOPE, ...GOOGLE_PROFILE_SCOPES],
+    scope: [GMAIL_MODIFY_SCOPE, CALENDAR_EVENTS_SCOPE, ...GOOGLE_PROFILE_SCOPES],
     state,
   });
 

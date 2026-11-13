@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Apple's calendars keep a fixed six-week grid so the layout never jumps when
 // you page between months.
@@ -73,7 +73,7 @@ export function Calendar() {
     });
   }, [cursor]);
 
-  const monthLabel = new Intl.DateTimeFormat("ko-KR", {
+  const monthLabel = new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "long",
   }).format(cursor);
@@ -100,12 +100,12 @@ export function Calendar() {
             onClick={goToToday}
             className="mr-2 rounded-full px-4 py-1.5 text-[15px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
           >
-            오늘
+            Today
           </button>
           <button
             type="button"
             onClick={() => setCursor(addMonths(cursor, -1))}
-            aria-label="이전 달"
+            aria-label="Previous month"
             className="flex h-11 w-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
           >
             <ChevronIcon direction="left" />
@@ -113,7 +113,7 @@ export function Calendar() {
           <button
             type="button"
             onClick={() => setCursor(addMonths(cursor, 1))}
-            aria-label="다음 달"
+            aria-label="Next month"
             className="flex h-11 w-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
           >
             <ChevronIcon direction="right" />

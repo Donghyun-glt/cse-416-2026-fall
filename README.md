@@ -71,7 +71,7 @@ MailFlow AI is one Next.js application: the React interface and the backend API 
 | Application framework and backend API | Next.js 16 route handlers, TypeScript |
 | Runtime | Node.js 22 LTS |
 | Database | PostgreSQL (managed, e.g. Neon) through `pg` |
-| Google integration | `googleapis` (OAuth 2.0, Gmail API v1) |
+| Google integration | `googleapis` (OAuth 2.0, Gmail API v1, Google Calendar API v3) |
 | AI | Google Gemini API (`gemini-3.5-flash-lite` by default) |
 | Hosting | Vercel |
 
@@ -88,7 +88,7 @@ These instructions are written for **Windows 10/11 (PowerShell)** and **macOS / 
 
 - [Node.js 22 LTS](https://nodejs.org/) (includes npm 10) and Git
 - A PostgreSQL database. A free [Neon](https://neon.tech/) project is the simplest option; a local PostgreSQL 17 server also works.
-- A Google Cloud project with the Gmail API enabled and a web OAuth client. See [frontend/README.md](frontend/README.md) for the step-by-step setup.
+- A Google Cloud project with the Gmail API and Google Calendar API enabled and a web OAuth client. See [frontend/README.md](frontend/README.md) for the step-by-step setup.
 - A Google Gemini API key from [Google AI Studio](https://aistudio.google.com) (the free tier is enough).
 
 Team members can ask a teammate for the shared development credentials instead of creating new ones.
@@ -128,7 +128,7 @@ cp .env.example frontend/.env.local
 | --- | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth web client |
 | `GOOGLE_REDIRECT_URI` | Yes | `http://localhost:3000/api/google/callback` for local development. It must also be registered in the Google Cloud console. |
-| `DATABASE_URL` | Yes | PostgreSQL connection string, e.g. `postgresql://user:password@host/database?sslmode=require` |
+| `DATABASE_URL` | Yes | PostgreSQL connection string, e.g. `postgresql://user:password@host/database?sslmode=verify-full` |
 | `SESSION_SECRET` | Yes | Long random value used to encrypt stored Google tokens |
 | `GEMINI_API_KEY` | Yes, for AI replies | Gemini API key |
 | `GEMINI_MODEL` | No | Overrides the default model |
