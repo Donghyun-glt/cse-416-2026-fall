@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { Priority } from "@/lib/mail-priority";
 import type { GmailAttachment } from "@/lib/gmail-message";
 import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
+import { CalendarSuggestions } from "./calendar-suggestions";
 
 export type Mail = {
   id: string;
@@ -439,10 +440,11 @@ export type MailDetailProps = {
   onDraftChange?: (hasDraft: boolean) => void;
   onMarkUnread?: () => void;
   onPriorityChange: (priority: Priority) => void;
+  onAnalyzedPriority?: (priority: Priority) => void;
   onStar: () => void;
 };
 
-export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, initialDraft, onDraftChange, onMarkUnread, onPriorityChange, onStar }: MailDetailProps) {
+export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, initialDraft, onDraftChange, onMarkUnread, onPriorityChange, onAnalyzedPriority, onStar }: MailDetailProps) {
   const sender = formatSender(message.from);
   const address = senderAddress(message.from);
   const visibleAttachments = useMemo(() => message.attachments.filter((attachment) => !attachment.inline), [message.attachments]);
@@ -1167,6 +1169,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       {/* ---------- Right column: AI reply panel ---------- */}
       {showAiPanel && (
         <aside className="mx-4 mt-6 lg:sticky lg:top-16 lg:mx-0 lg:mt-0">
+          <CalendarSuggestions messageId={message.id} account={myEmail} onAnalyzedPriority={onAnalyzedPriority} />
           <div className="rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
             <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#5b4bd6]">
               <GIcon name="sparkle" className="h-4 w-4" />Suggested reply
@@ -1179,7 +1182,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5e5e5e] text-white"><GIcon name="unread" className="h-5 w-5" /></span>
                   <div className="text-sm">
                     <p className="font-semibold text-[#1f1f1f]">Automated notification</p>
-                    <p className="mt-0.5 text-[#5e5e5e]">This looks like a system-generated message rather than a note from a person, so no reply draft was generated.</p>
+                    <p className="mt-0.5 text-[#5e5e5e]">This sender appears automated, so no reply draft was generated. Important instructions and deadlines may still appear in Email insights above.</p>
                   </div>
                 </div>
                 <p className="text-sm text-[#5e5e5e]">Notifications like this don&apos;t usually expect a reply — but you can still have one drafted if you need it.</p>

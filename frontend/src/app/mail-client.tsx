@@ -109,6 +109,12 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
   const bodyCacheRef = useRef(new Map<string, Pick<Mail, "html" | "attachments">>());
+  const analyzedMessageId = selectedMail?.id;
+  const applyAnalyzedPriority = useCallback((priority: Priority) => {
+    if (!analyzedMessageId) return;
+    setMessages((current) => current.map((message) => message.id === analyzedMessageId ? { ...message, priority } : message));
+    setSelectedMail((current) => current?.id === analyzedMessageId ? { ...current, priority } : current);
+  }, [analyzedMessageId]);
 
   const loadMessages = useCallback(async (targetView: View, showLoading = false, pageToken = "") => {
     if (targetView === "calendar") return;
@@ -613,6 +619,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
             onNotSpam={view === "spam" ? () => void applyMessageAction("notSpam") : undefined}
             onMarkUnread={selectedMail.draft ? undefined : () => void applyMessageAction("unread")}
             onPriorityChange={(priority) => void changePriority(priority)}
+            onAnalyzedPriority={applyAnalyzedPriority}
             onStar={() => void toggleStar(selectedMail)}
           />
         ) : (

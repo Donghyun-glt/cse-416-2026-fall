@@ -29,15 +29,16 @@ export default function PrivacyPolicy() {
             it, and moving it to or restoring it from Trash. MailFlow priority categories are stored in MailFlow&apos;s
             database and are not applied to your Gmail messages as labels.
           </li>
+          <li><strong>Calendar events</strong> (<code>calendar.events</code>): MailFlow reads your primary calendar and creates events only after you review and save them.</li>
         </ul>
-        <p>MailFlow never sends email on your behalf and never permanently deletes your messages.</p>
+        <p>MailFlow sends email only when you choose Send and never permanently deletes your messages.</p>
       </section>
 
       <section>
         <h2>How we use your data</h2>
         <ul>
-          <li>Message content is processed only to show it to you and to compute a priority with rules that run on our server.</li>
-          <li>Message content is not sent to any third-party service, including AI or machine learning providers.</li>
+          <li>Message content is processed to display your mail, classify priority, suggest replies, and identify possible appointments or deadlines.</li>
+          <li>When AI features run, relevant message content is sent to Google Gemini to generate reply drafts, identify important instructions, and suggest calendar events. Opening an eligible received message starts content analysis; generated analysis can be kept temporarily in server memory for up to 10 minutes. Suggestions do not send mail or create calendar events until you approve the action.</li>
           <li>We do not use your data for advertising, sell it, or use it to train AI models.</li>
           <li>No person reads your messages, unless you explicitly ask us to for support, it is needed for security purposes, or the law requires it.</li>
         </ul>
@@ -63,8 +64,8 @@ export default function PrivacyPolicy() {
       <section>
         <h2>Sharing</h2>
         <p>
-          We do not share your Google user data with third parties. Our hosting and database providers
-          store this data on our behalf only to run the service.
+          Google Gemini processes relevant message content for AI features. Our hosting and database providers
+          process data on our behalf to run the service. We do not sell your Google user data.
         </p>
       </section>
 

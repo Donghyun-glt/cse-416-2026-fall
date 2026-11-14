@@ -29,6 +29,7 @@ type GenerateOptions = {
   temperature?: number;
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  responseJsonSchema?: Record<string, unknown>;
 };
 
 type GenerateContentResponse = {
@@ -53,6 +54,7 @@ export async function generateText(prompt: string, options: GenerateOptions = {}
       generationConfig: {
         temperature: options.temperature ?? 0.7,
         maxOutputTokens: options.maxOutputTokens ?? 1024,
+        ...(options.responseJsonSchema ? { responseMimeType: "application/json", responseJsonSchema: options.responseJsonSchema } : {}),
       },
     }),
     signal: options.signal,

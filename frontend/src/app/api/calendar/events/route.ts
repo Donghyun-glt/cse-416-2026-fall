@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getGmailSession } from "@/lib/gmail-session";
 import { CALENDAR_EVENTS_SCOPE, createGoogleOAuthClient } from "@/lib/google";
+import { createHash } from "node:crypto";
+import { validDate } from "@/lib/calendar-suggestion";
 
 function errorStatus(error: unknown) {
   if (!error || typeof error !== "object") return undefined;
@@ -100,28 +102,46 @@ export async function POST(request: NextRequest) {
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid_event" }, { status: 400 }); }
   if (!body || typeof body !== "object") return NextResponse.json({ error: "invalid_event" }, { status: 400 });
-  const { title, start, end, location } = body as Record<string, unknown>;
+  const { title, start, end, location, description, allDay, sourceMessageId, sourceCandidateKey, approved } = body as Record<string, unknown>;
+  if (sourceMessageId !== undefined && (approved !== true || typeof sourceMessageId !== "string" || !/^[a-zA-Z0-9_-]{1,200}$/.test(sourceMessageId) || typeof sourceCandidateKey !== "string" || sourceCandidateKey.length > 500)) {
+    return NextResponse.json({ error: "approval_required" }, { status: 400 });
+  }
+  if (allDay === true && (typeof start !== "string" || typeof end !== "string" || !validDate(start) || !validDate(end))) {
+    return NextResponse.json({ error: "invalid_event" }, { status: 400 });
+  }
   const startTime = typeof start === "string" ? Date.parse(start) : NaN;
   const endTime = typeof end === "string" ? Date.parse(end) : NaN;
   if (typeof title !== "string" || !title.trim() || title.length > 200 ||
       !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime ||
       endTime - startTime > 7 * 86400000 ||
-      (location !== undefined && (typeof location !== "string" || location.length > 500))) {
+      (location !== undefined && (typeof location !== "string" || location.length > 500)) ||
+      (description !== undefined && (typeof description !== "string" || description.length > 8000))) {
     return NextResponse.json({ error: "invalid_event" }, { status: 400 });
   }
 
+  // Stable event IDs make retries and simultaneous approvals idempotent, even
+  // after a network timeout or on another server instance. Google IDs accept hex.
+  const eventId = typeof sourceMessageId === "string"
+    ? createHash("sha256").update(`mailflow:${sourceMessageId}:${sourceCandidateKey}`).digest("hex")
+    : undefined;
   try {
     const response = await calendar.events.insert({
       calendarId: "primary",
       requestBody: {
+        id: eventId,
         summary: title.trim(),
-        start: { dateTime: new Date(startTime).toISOString() },
-        end: { dateTime: new Date(endTime).toISOString() },
+        description: typeof description === "string" ? description.trim() : undefined,
+        start: allDay === true ? { date: start as string } : { dateTime: new Date(startTime).toISOString() },
+        end: allDay === true ? { date: end as string } : { dateTime: new Date(endTime).toISOString() },
         location: typeof location === "string" ? location.trim() : undefined,
+        extendedProperties: typeof sourceMessageId === "string" ? { private: { mailflowMessageId: sourceMessageId } } : undefined,
       },
     });
     return NextResponse.json({ id: response.data.id, url: response.data.htmlLink }, { status: 201 });
   } catch (error) {
+    if (eventId && errorStatus(error) === 409) {
+      return NextResponse.json({ id: eventId, alreadyAdded: true });
+    }
     return failure(error);
   }
 }

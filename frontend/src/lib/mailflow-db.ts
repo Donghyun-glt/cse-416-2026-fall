@@ -53,26 +53,29 @@ export async function recordPriority(input: {
   reason: string;
   signals?: PrioritySignals;
 }) {
-  await withTransaction(async (client) => {
+  return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
       `${input.userId}:${input.gmailMessageId}`,
     ]);
 
-    const current = await client.query<{ priority: Priority }>(`
-      SELECT priority
+    const current = await client.query<{ priority: Priority; source: PrioritySource }>(`
+      SELECT priority, source
       FROM message_priorities
       WHERE user_id = $1 AND gmail_message_id = $2
       FOR UPDATE
     `, [input.userId, input.gmailMessageId]);
     const previousPriority = current.rows[0]?.priority;
+    // Automatic analysis may finish after a manual edit. Respect that edit
+    // inside the same lock used by both writers, including edits to the same label.
+    if (current.rows[0]?.source === "manual" && input.source === "automatic") return previousPriority;
 
-    if (previousPriority === input.priority) {
+    if (previousPriority === input.priority && current.rows[0]?.source === input.source) {
       await client.query(`
         UPDATE message_priorities
-        SET last_seen_at = NOW()
+        SET last_seen_at = NOW(), reason = $3, signals = $4
         WHERE user_id = $1 AND gmail_message_id = $2
-      `, [input.userId, input.gmailMessageId]);
-      return;
+      `, [input.userId, input.gmailMessageId, input.reason, input.signals ?? null]);
+      return input.priority;
     }
 
     const signals = input.signals ?? null;
@@ -96,7 +99,6 @@ export async function recordPriority(input: {
       input.reason,
       signals,
     ]);
-
     await client.query(`
       INSERT INTO priority_events (
         user_id, gmail_message_id, previous_priority, new_priority,
@@ -111,6 +113,7 @@ export async function recordPriority(input: {
       input.reason,
       signals,
     ]);
+    return input.priority;
   });
 }
 

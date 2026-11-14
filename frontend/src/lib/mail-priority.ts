@@ -27,18 +27,19 @@ export function classifyPriorityWithReason(message: Pick<gmail_v1.Schema$Message
   const text = `${subject} ${message.snippet ?? ""}`.toLowerCase();
   const automated = /(?:no-?reply|notifications?|newsletter|digest|updates?|mailer-daemon|marketing)@/i.test(from)
     || /\b(?:newsletter|digest|unsubscribe|receipt|order confirmation|recording is ready|weekly roundup|notification(?:s)?)\b/i.test(text);
-  const directAction = /\b(?:please|could you|can you|need you to|your approval|your response|reply|respond|review|approve|sign(?:[ -]?off)?|send|submit|fix|blocked|waiting (?:on|for) you)\b/i.test(text)
-    || /(?:확인해\s*주세요|회신|답장|승인|서명|처리해\s*주세요|부탁드립니다)/.test(text);
+  const directAction = /\b(?:please|could you|can you|need you to|your approval|your response|reply|respond|review|approve|sign(?:[ -]?off)?|send|submit|fix|blocked|waiting (?:on|for) you|must|required|check[ -]?in|payment failed|account suspended)\b/i.test(text)
+    || /(?:확인해\s*주세요|회신|답장|승인|서명|처리해\s*주세요|부탁드립니다|입실|지참|제출|납부|출석|미납|계정\s*정지)/.test(text);
   const timeSensitive = /\b(?:today|tonight|asap|immediately|by (?:[1-9](?::\d{2})?\s*(?:am|pm)?|noon|midnight|end of day|eod)|before (?:[1-9](?::\d{2})?\s*(?:am|pm)?|noon|midnight|end of day|eod)|deadline|overdue|within \d+ hours?|by tomorrow|tomorrow morning)\b/i.test(text)
     || /(?:오늘|내일\s*오전|마감|긴급|당장|즉시)/.test(text);
   const activeBlocker = /\b(?:production (?:issue|outage)|service (?:down|outage)|client is waiting|customer is waiting|blocked|cannot proceed)\b/i.test(text)
     || /(?:서비스\s*장애|고객이\s*기다|진행할\s*수\s*없)/.test(text);
 
   const signals = { automated, directAction, timeSensitive, activeBlocker };
-  if (!automated && activeBlocker) {
-    return { priority: "urgent", reason: "A non-automated message contains an active blocker", signals };
+  const promotional = /\b(?:sale|shop now|discount|coupon|limited offer)\b|할인|특가|쿠폰/.test(text);
+  if (!promotional && activeBlocker) {
+    return { priority: "urgent", reason: "The message contains an active blocker", signals };
   }
-  if (!automated && directAction && timeSensitive) {
+  if (!promotional && directAction && timeSensitive) {
     return { priority: "urgent", reason: "A direct request includes time-sensitive language", signals };
   }
   if (automated && !directAction) {

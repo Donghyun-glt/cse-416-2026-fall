@@ -1,0 +1,125 @@
+[
+  {
+    "name": "ko-mandatory-assessment",
+    "source": "2027년도 전문과정 지원자 평가 안내\n지원하신 분들은 평가에 반드시 참석하시기 바랍니다.\n평가 일시: 2026.11.20(금) 오전 8시50분~\n입실: 8:40까지 완료\n9시부터는 입실 및 응시 불가합니다.\n준비물: 응시표와 신분증을 모두 반드시 지참하세요.\n장소는 지원 분야별 안내 링크에서 확인해 주세요.",
+    "expected": {
+      "importance": "high",
+      "relevance": "recipient_action",
+      "events": 1,
+      "date": "2026-11-20",
+      "time": "08:50",
+      "kinds": [
+        "preparation",
+        "consequence"
+      ]
+    }
+  },
+  {
+    "name": "en-confirmed-interview",
+    "source": "Your interview is confirmed for 20 November 2026 at 2:30 PM UTC. Please attend the video call and prepare your portfolio. The call ends at 3:00 PM UTC. Video link is in your candidate portal. You do not need to reply to this automated message.",
+    "expected": {
+      "importance": "high",
+      "relevance": "recipient_action",
+      "events": 1,
+      "date": "2026-11-20",
+      "time": "14:30",
+      "kinds": [
+        "preparation"
+      ]
+    }
+  },
+  {
+    "name": "medical-instructions-without-date",
+    "source": "Discharge instructions for your recovery: Do not stop your prescribed medication without speaking with your clinician. Bring your medication list to your next visit. Contact your care team immediately if you develop a fever. No follow-up appointment has been scheduled yet.",
+    "expected": {
+      "importance": "high",
+      "events": 0,
+      "kinds": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "marketing-urgency",
+    "source": "URGENT! Flash sale ends November 20, 2026 at 9 PM UTC. Shop now and get 40% off! No purchase or attendance is required. Unsubscribe from offers anytime.",
+    "expected": {
+      "importance": "low",
+      "events": 0,
+      "kinds": [],
+      "relevanceOneOf": [
+        "optional",
+        "unrelated"
+      ]
+    }
+  },
+  {
+    "name": "ko-schedule-change",
+    "source": "예약 변경 안내\n11월 20일 오후 3시로 예정되었던 고객님의 방문 예약이 취소되었습니다. 새로운 일시는 담당자가 다시 안내드리겠습니다. 기존 일정은 사용하지 마세요. 자동 발송이므로 회신하지 마세요.",
+    "expected": {
+      "importance": "high",
+      "events": 0,
+      "kinds": [
+        "change"
+      ]
+    }
+  },
+  {
+    "name": "routine-receipt",
+    "source": "Payment receipt: Your subscription payment of $10 was received on November 12, 2026. Your account is in good standing. This is a receipt for your records. No action is required.",
+    "expected": {
+      "events": 0,
+      "notUrgent": true,
+      "kinds": [
+        "information"
+      ]
+    }
+  },
+  {
+    "name": "required-renewal-in-bulk-mail",
+    "source": "License holder notice: Your professional license expires on 2026/11/20. You must submit your renewal by 2026/11/19 to continue working legally. Failure to renew suspends your authorization. This notice is sent to all license holders. Unsubscribe preferences are managed in the portal.",
+    "expected": {
+      "importance": "high",
+      "relevance": "recipient_action",
+      "eventsMin": 1,
+      "kinds": [
+        "deadline",
+        "consequence"
+      ]
+    }
+  },
+  {
+    "name": "undated-work-request",
+    "source": "Could you review the attached architecture proposal and send your feedback? We need your input before choosing an approach. No review deadline or meeting has been agreed yet.",
+    "expected": {
+      "importance": "high",
+      "relevance": "recipient_action",
+      "events": 0,
+      "kinds": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "other-person-appointment",
+    "source": "For your information, my own dentist appointment is on November 20, 2026 at 10 AM UTC, so I will be away for an hour. You do not need to attend, cover for me, or take any action.",
+    "expected": {
+      "events": 0,
+      "notUrgent": true,
+      "kinds": [
+        "information"
+      ]
+    }
+  },
+  {
+    "name": "ambiguous-date-still-important",
+    "source": "Your mandatory compliance assessment is scheduled for 03/04/2027 at 9 AM. You must attend to retain building access. The notice does not specify whether this is March 4 or April 3. Please confirm the date with the organizer.",
+    "expected": {
+      "importance": "high",
+      "events": 0,
+      "kinds": [
+        "action",
+        "consequence"
+      ]
+    }
+  }
+]
