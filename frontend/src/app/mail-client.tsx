@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
 import { GoogleCalendar } from "./google-calendar";
+import { DailyBriefing } from "./daily-briefing";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
 import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "./mail-detail";
 
@@ -115,6 +116,12 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
     setMessages((current) => current.map((message) => message.id === analyzedMessageId ? { ...message, priority } : message));
     setSelectedMail((current) => current?.id === analyzedMessageId ? { ...current, priority } : current);
   }, [analyzedMessageId]);
+
+  // Briefing cards analyse every message of the day; move a card when its stored priority changes.
+  const applyBriefingPriority = useCallback((id: string, priority: Priority) => {
+    setMessages((current) => current.some((message) => message.id === id && message.priority !== priority)
+      ? current.map((message) => message.id === id ? { ...message, priority } : message).sort(comparePriority) : current);
+  }, []);
 
   const loadMessages = useCallback(async (targetView: View, showLoading = false, pageToken = "") => {
     if (targetView === "calendar") return;
@@ -631,9 +638,6 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           {view === "briefing" && <TodayCard />}
           <section>
             <div className="mb-3">{view === "briefing" && <h2 className="text-base font-extrabold">Today&apos;s emails</h2>}<p className="mt-0.5 text-xs text-[#9a968c]">{loading ? "Syncing your inbox…" : view === "briefing" ? `${messages.length} message${messages.length === 1 ? "" : "s"} · Updates automatically` : `Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`}</p></div>
-            {view === "briefing" && <div className="mb-4 flex flex-wrap gap-2" aria-label="Today's priority counts">
-              {(["urgent", "fyi", "low"] as const).map((priority) => <span key={priority} className={`rounded-full px-3 py-1.5 text-xs font-bold ${priorityDisplay[priority].className}`}>{messages.filter((message) => message.priority === priority).length} {priorityDisplay[priority].label}</span>)}
-            </div>}
             {error && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
             {(view === "trash" || view === "spam") && <p className="mb-3 rounded-xl bg-[#ececea] px-4 py-3 text-center text-sm text-[#6f6b64]">Messages in {view === "trash" ? "Trash" : "Spam"} are automatically deleted after 30 days.</p>}
             {view !== "briefing" && <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Filters">
@@ -674,7 +678,9 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
               })()}</div>
               <div className="flex items-center gap-1"><button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} aria-label="Previous page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">‹</button><button type="button" onClick={goToNextPage} disabled={!nextPageToken} aria-label="Next page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-[#656159] transition hover:bg-[#f0eee9] disabled:cursor-not-allowed disabled:opacity-30">›</button></div>
             </div>}
-            <div className="overflow-hidden rounded-2xl border border-[#e1ded8] bg-white shadow-[0_2px_8px_rgba(31,31,27,0.04)]">
+            {view === "briefing" && !loading && messages.length > 0
+              ? <DailyBriefing messages={messages} account={profile.email} onOpen={openMessage} onPriority={applyBriefingPriority} />
+              : <div className="overflow-hidden rounded-2xl border border-[#e1ded8] bg-white shadow-[0_2px_8px_rgba(31,31,27,0.04)]">
               {loading ? <div className="p-8 text-center text-sm text-[#98948a]">Loading messages…</div> : messages.length === 0 ? <div className="p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#eeecfb] text-[#5944d8]"><Icon name="inbox" /></div><p className="mt-4 font-bold">You&apos;re all caught up</p><p className="mt-1 text-sm text-[#99958c]">{view === "briefing" ? "No inbox messages have arrived since midnight." : view === "sent" ? "You haven't sent any messages yet." : view === "spam" ? "Nothing in Spam." : onlyAttachments || onlyUnread ? "No messages match these filters." : view === "inbox" ? "Your inbox is empty. Archived mail is in All Emails." : "There are no messages to show."}</p></div> : messages.map((message, index) => {
                 const sender = view === "sent" ? `To: ${formatSender(message.to.split(",")[0] || "") || "(no recipient)"}` : formatSender(message.from);
                 const color = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"][index % 5];
@@ -688,7 +694,7 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
                   </div>
                 </article>;
               })}
-            </div>
+            </div>}
           </section>
           </>}
         </div>

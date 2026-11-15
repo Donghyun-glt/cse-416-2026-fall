@@ -55,3 +55,11 @@ test('an invented numeric requirement is not shown as a verified key point', () 
  const input = raw(); input.keyPoints = [point('preparation', 'Bring 3 photo IDs.', 'Bring your photo ID.')];
  assert.equal(validateMailAnalysis(input, source, context).keyPoints.length, 0);
 });
+
+test('briefing summary is kept when its numbers come from the email and replaced when they do not', () => {
+ const kept = raw(); kept.summary = 'The license must be renewed by 2026/11/15 to keep access.';
+ assert.equal(validateMailAnalysis(kept, source, context).summary, 'The license must be renewed by 2026/11/15 to keep access.');
+ const invented = raw(); invented.summary = 'Renew within 30 days or pay a $50 fee.';
+ assert.equal(validateMailAnalysis(invented, source, context).summary, 'Renewal is necessary to retain access.');
+ assert.equal(validateMailAnalysis(raw(), source, context).summary, 'Renewal is necessary to retain access.');
+});
