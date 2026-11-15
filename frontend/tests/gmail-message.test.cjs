@@ -135,3 +135,13 @@ test("List-Unsubscribe prefers the https target", () => {
   });
   assert.equal(message.unsubscribeUrl, "https://list.example/u?id=1");
 });
+
+test("a message's dark-mode rules never apply on MailFlow's light card", () => {
+  const parseGmailMessage = loadParser();
+  const html = '<style>.t{color:#202124}@media (prefers-color-scheme: dark){.t{color:#e8eaed}}@media screen and (prefers-color-scheme:dark){.t{color:#fff}}@media (max-width:600px){.t{font-size:14px}}</style><p class="t">Office hours</p>';
+  const message = parseGmailMessage({ id: "m", payload: { mimeType: "text/html", headers: [], body: { data: Buffer.from(html).toString("base64url") } } });
+  assert.doesNotMatch(message.html, /prefers-color-scheme\s*:\s*dark/);
+  assert.match(message.html, /@media not all\{\.t\{color:#e8eaed\}\}/);
+  assert.match(message.html, /@media \(max-width:600px\)/); // Other media rules are untouched.
+  assert.match(message.html, /Office hours/);
+});

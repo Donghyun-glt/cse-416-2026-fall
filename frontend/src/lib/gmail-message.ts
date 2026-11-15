@@ -217,6 +217,10 @@ function sanitizeEmailHtml(html: string) {
       .replace(/<\/?(html|head|body)\b[^>]*>/gi, "")
       .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
       .replace(/javascript:/gi, "blocked:")
+      // MailFlow always shows mail on a light card. A message's own dark-mode rules
+      // (e.g. Google Calendar's) would otherwise turn its text near-white on that card
+      // whenever the reader's system is in dark mode, so those rules are made to never match.
+      .replace(/\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi, "not all")
   );
 }
 
