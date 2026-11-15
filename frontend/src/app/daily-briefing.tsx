@@ -116,42 +116,44 @@ function CalendarGlyph() {
 function BriefingCard({ message, insight, color, onOpen }: { message: Mail; insight: Insight | null | undefined; color: string; onOpen: (message: Mail) => void }) {
   const sender = formatSender(message.from);
   const calendar = eventStatus(insight);
+  const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
   return <button type="button" onClick={() => onOpen(message)}
-    className={`block w-full rounded-xl border p-3.5 text-left transition hover:-translate-y-px hover:shadow-[0_4px_14px_rgba(31,31,27,0.09)] ${message.unread ? "border-[#dcd8ee] bg-white" : "border-[#e6e4de] bg-[#f6f5f2]"}`}>
-    <span className="flex items-center gap-2.5">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span>
-      <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold text-[#55524c]"}`}>{sender}</span>
-      {message.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-[#5944d8]" aria-label="Unread" />}
-      <time className="shrink-0 text-xs text-[#96938b]">{timeLabel(message.date)}</time>
+    className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-[0_3px_12px_rgba(31,31,27,0.08)] ${message.unread ? "border-[#dcd8ee] bg-white" : "border-[#e6e4de] bg-[#f6f5f2]"}`}>
+    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span>
+    <span className="min-w-0 flex-1">
+      <span className="flex items-center gap-2">
+        <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold text-[#55524c]"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject || "(no subject)"}</span></span>
+        {message.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-[#5944d8]" aria-label="Unread" />}
+        <time className="shrink-0 text-xs text-[#96938b]">{timeLabel(message.date)}</time>
+      </span>
+      {insight === undefined
+        ? <span className="mt-2 block space-y-1.5" aria-label="Summarizing"><span className="block h-2.5 w-full animate-pulse rounded bg-[#eceae5]" /><span className="block h-2.5 w-1/2 animate-pulse rounded bg-[#eceae5]" /></span>
+        : <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-[#6f6b64]">{insight?.summary || message.snippet}</span>}
+      {(calendar || message.hasDraft || hasAttachment) && <span className="mt-2 flex flex-wrap items-center gap-1.5">
+        {calendar && <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${calendar.added ? "bg-[#e6f4ea] text-[#256c3b]" : "bg-[#eeecfb] text-[#5742d5]"}`}><CalendarGlyph /><span className="truncate">{calendar.added ? "Added" : "Add to calendar?"} · {eventLabel(calendar.event)}</span></span>}
+        {message.hasDraft && <span className="rounded-full bg-[#fce8e6] px-2.5 py-1 text-xs font-bold text-[#c5221f]">Draft</span>}
+        {hasAttachment && <span className="rounded-full bg-[#efeee9] px-2.5 py-1 text-xs font-bold text-[#655f58]">Attachment</span>}
+      </span>}
     </span>
-    <span className={`mt-2 line-clamp-2 block text-sm leading-5 ${message.unread ? "font-bold" : "font-medium"}`}>{message.subject || "(no subject)"}</span>
-    {insight === undefined
-      ? <span className="mt-2 block space-y-1.5" aria-label="Summarizing"><span className="block h-2.5 w-full animate-pulse rounded bg-[#eceae5]" /><span className="block h-2.5 w-2/3 animate-pulse rounded bg-[#eceae5]" /></span>
-      : <span className="mt-1.5 line-clamp-3 block text-[13px] leading-5 text-[#6f6b64]">{insight?.summary || message.snippet}</span>}
-    {(calendar || message.hasDraft || message.attachments.some((attachment) => !attachment.inline)) && <span className="mt-2.5 flex flex-wrap items-center gap-1.5">
-      {calendar && <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${calendar.added ? "bg-[#e6f4ea] text-[#256c3b]" : "bg-[#eeecfb] text-[#5742d5]"}`}><CalendarGlyph /><span className="truncate">{calendar.added ? "Added" : "Add to calendar?"} · {eventLabel(calendar.event)}</span></span>}
-      {message.hasDraft && <span className="rounded-full bg-[#fce8e6] px-2.5 py-1 text-xs font-bold text-[#c5221f]">Draft</span>}
-      {message.attachments.some((attachment) => !attachment.inline) && <span className="rounded-full bg-[#efeee9] px-2.5 py-1 text-xs font-bold text-[#655f58]">Attachment</span>}
-    </span>}
   </button>;
 }
 
-/** Today's inbox as three priority columns, each card carrying an AI summary and a calendar flag. */
+/** Today's inbox as a vertical list grouped by priority; each row carries an AI summary and a calendar flag. */
 export function DailyBriefing({ messages, onOpen, onPriority }: { messages: Mail[]; onOpen: (message: Mail) => void; onPriority: (id: string, priority: Priority) => void }) {
   const insights = useInsights(messages.map((message) => message.id), onPriority);
-  return <div className="grid gap-x-5 gap-y-6 lg:grid-cols-3">
+  return <div className="space-y-5">
     {PRIORITIES.map((priority) => {
       const group = messages.filter((message) => message.priority === priority);
+      if (group.length === 0) return null; // An empty group would only add white space.
       const section = sections[priority];
-      return <section key={priority} aria-label={`${section.label} emails`} className="min-w-0">
-        <header className={`mb-3 flex items-center gap-2 rounded-full px-4 py-2 ${section.header}`}>
+      return <section key={priority} aria-label={`${section.label} emails`}>
+        <header className={`mb-2 inline-flex items-center gap-2 rounded-full px-3 py-1.5 ${section.header}`}>
           <span className={`h-2 w-2 rounded-full ${section.dot}`} aria-hidden="true" />
           <h3 className="text-xs font-extrabold uppercase tracking-wide">{section.label}</h3>
-          <span className="ml-auto text-xs font-extrabold">{group.length}</span>
+          <span className="text-xs font-extrabold opacity-70">{group.length}</span>
         </header>
-        <div className="space-y-2.5">
-          {group.length === 0 ? <p className="py-6 text-center text-sm text-[#a5a299]">Nothing here today</p>
-            : group.map((message) => <BriefingCard key={message.id} message={message} insight={insights[message.id]} color={avatarColors[messages.indexOf(message) % avatarColors.length]} onOpen={onOpen} />)}
+        <div className="space-y-2">
+          {group.map((message) => <BriefingCard key={message.id} message={message} insight={insights[message.id]} color={avatarColors[messages.indexOf(message) % avatarColors.length]} onOpen={onOpen} />)}
         </div>
       </section>;
     })}
