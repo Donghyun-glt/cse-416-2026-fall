@@ -94,10 +94,12 @@ export function emailBodyToText(body: string) {
 }
 
 const toneGuide: Record<ReplyTone, string> = {
-  professional: "professional and courteous, like a thoughtful colleague",
-  friendly: "warm and friendly, conversational but still respectful",
+  // Shown in the UI as Casual / Polite / Formal. English tone words alone barely change a
+  // Korean reply, so each level also names the Korean speech level it maps to.
+  professional: "polite and courteous, like a thoughtful colleague. For a Korean reply use standard polite 해요체",
+  friendly: "warm and friendly, conversational but still respectful. For a Korean reply use relaxed, friendly 해요체; use 반말 only if the original email itself is written in 반말",
   concise: "direct and to the point, no filler",
-  formal: "formal and polished, suitable for official or external correspondence",
+  formal: "formal and polished, suitable for official or external correspondence. For a Korean reply use 다나까체: every sentence ends in -다, -나 or -까 (e.g. -습니다, -습니까), never in -요, with full honorifics throughout",
 };
 
 const lengthGuide: Record<ReplyLength, string> = {

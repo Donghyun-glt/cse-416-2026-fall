@@ -75,7 +75,7 @@ function parseSavedReply(value: unknown): SavedReply | null {
   };
 }
 
-const toneLabel: Record<ReplyTone, string> = { friendly: "Friendly", professional: "Professional", concise: "Concise", formal: "Formal" };
+const toneLabel: Record<ReplyTone, string> = { friendly: "Casual", professional: "Polite", concise: "Concise", formal: "Formal" };
 const lengthLabel: Record<ReplyLength, string> = { short: "Short", medium: "Medium", long: "Detailed" };
 
 /** System-generated mail (no-reply senders, list mail) does not expect a reply, so no draft is generated up front. */
