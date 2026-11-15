@@ -5,6 +5,7 @@ import type { Priority } from "@/lib/mail-priority";
 import type { GmailAttachment } from "@/lib/gmail-message";
 import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
 import { CalendarSuggestions } from "./calendar-suggestions";
+import { COMPOSER_FONTS, EDITOR_CONTENT_CLASS, FormatToolbar } from "./format-toolbar";
 
 export type Mail = {
   id: string;
@@ -40,23 +41,8 @@ export type SavedDraft = {
 
 type ComposeMode = "reply" | "replyAll" | "forward";
 
-// Same font and size choices as Gmail's compose toolbar.
-const COMPOSER_FONTS = [
-  ["Sans Serif", "Arial, Helvetica, sans-serif"],
-  ["Serif", "'Times New Roman', serif"],
-  ["Fixed Width", "'Courier New', monospace"],
-  ["Wide", "'Arial Black', sans-serif"],
-  ["Narrow", "'Arial Narrow', sans-serif"],
-  ["Comic Sans MS", "'Comic Sans MS', sans-serif"],
-  ["Garamond", "Garamond, serif"],
-  ["Georgia", "Georgia, serif"],
-  ["Tahoma", "Tahoma, sans-serif"],
-  ["Trebuchet MS", "'Trebuchet MS', sans-serif"],
-  ["Verdana", "Verdana, sans-serif"],
-] as const;
-const COMPOSER_SIZES = [["Small", "2"], ["Normal", "3"], ["Large", "5"], ["Huge", "6"]] as const;
 // Keep in sync with MAX_ATTACHMENT_BYTES in the send route.
-const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 
 // Slider stops for the AI panel (left -> right).
 const TONE_STOPS: ReplyTone[] = ["friendly", "professional", "formal"];
@@ -158,7 +144,7 @@ function fullDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function formatBytes(value: number) {
+export function formatBytes(value: number) {
   if (!value) return "";
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
@@ -221,11 +207,11 @@ const ICONS = {
 
 type IconName = keyof typeof ICONS;
 
-function GIcon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
+export function GIcon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
   return <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true"><path d={ICONS[name]} /></svg>;
 }
 
-function ToolbarButton({ icon, label, onClick, disabled, active, className = "" }: { icon: IconName; label: string; onClick?: () => void; disabled?: boolean; active?: boolean; className?: string }) {
+export function ToolbarButton({ icon, label, onClick, disabled, active, className = "" }: { icon: IconName; label: string; onClick?: () => void; disabled?: boolean; active?: boolean; className?: string }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label}
       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#1f1f1f14] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${active ? "text-[#e2a600]" : "text-[#444746]"} ${className}`}>
@@ -494,10 +480,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const moreRef = useDismiss(moreOpen, closeMore);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const savedRangeRef = useRef<Range | null>(null);
   const [files, setFiles] = useState<File[]>([]);
-  const [fontFamily, setFontFamily] = useState<string>(COMPOSER_FONTS[0][1]);
-  const [fontSize, setFontSize] = useState<string>("3");
   // Draft autosave: like Gmail, an unfinished reply is kept in Drafts.
   const [draftStatus, setDraftStatus] = useState<"" | "saving" | "saved" | "error">("");
   const [revision, setRevision] = useState(0);
@@ -535,9 +518,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     setForwardTo("");
     setBody("");
     setFiles([]);
-    setFontFamily(COMPOSER_FONTS[0][1]);
-    setFontSize("3");
-    savedRangeRef.current = null;
     if (composerRef.current) composerRef.current.innerHTML = "";
     composerStateRef.current = { mode, body: "", html: "", to: "", files: [] };
     draftIdRef.current = "";
@@ -563,15 +543,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   };
 
   // ----- Rich-text composer (a contentEditable area, like Gmail's) -----
-  // Toolbar controls take focus away from the editor, so the caret/selection
-  // is remembered and put back before a formatting command runs.
-  const rememberSelection = () => {
-    const selection = window.getSelection();
-    const editor = composerRef.current;
-    if (!selection || selection.rangeCount === 0 || !editor) return;
-    const range = selection.getRangeAt(0);
-    if (editor.contains(range.commonAncestorContainer)) savedRangeRef.current = range.cloneRange();
-  };
   const syncComposer = () => {
     const editor = composerRef.current;
     if (!editor) return;
@@ -583,21 +554,6 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     composerStateRef.current.html = editor.innerHTML;
     // Formatting can change without the text changing, so autosave follows this counter too.
     setRevision((current) => current + 1);
-    rememberSelection();
-  };
-  const format = (command: string, value?: string) => {
-    const editor = composerRef.current;
-    if (!editor) return;
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && savedRangeRef.current) {
-      selection.removeAllRanges();
-      selection.addRange(savedRangeRef.current);
-    }
-    // execCommand is the same editing API browsers expose to every webmail composer.
-    document.execCommand("styleWithCSS", false, "true");
-    document.execCommand(command, false, value);
-    syncComposer();
   };
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
@@ -1161,7 +1117,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
               <div ref={composerRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Message body"
                 data-placeholder={composeMode === "forward" ? "Add a message…" : "Write your reply…"}
-                onInput={syncComposer} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onBlur={rememberSelection}
+                onInput={syncComposer}
                 onPaste={(event) => {
                   // Paste as plain text so foreign styles and markup do not end up in the message.
                   event.preventDefault();
@@ -1170,7 +1126,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                 onDrop={(event) => { if (event.dataTransfer.files.length > 0) { event.preventDefault(); addFiles(event.dataTransfer.files); } }}
                 onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canSend) { event.preventDefault(); void sendMessage(); } }}
                 style={{ fontFamily: COMPOSER_FONTS[0][1] }}
-                className="max-h-[50vh] min-h-[130px] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 outline-none empty:before:pointer-events-none empty:before:text-[#9a9a9a] empty:before:content-[attr(data-placeholder)] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6" />
+                className={`max-h-[50vh] min-h-[130px] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 outline-none empty:before:pointer-events-none empty:before:text-[#9a9a9a] empty:before:content-[attr(data-placeholder)] ${EDITOR_CONTENT_CLASS}`} />
 
               {/* The original message is added below the text when it is sent */}
               <div className="px-4 pb-2">
@@ -1205,27 +1161,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
               )}
               {composeError && <p className="mx-4 mb-3 rounded bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{composeError}</p>}
 
-              {/* Formatting toolbar. onMouseDown keeps the text selection while a button is clicked. */}
-              <div className="mx-4 mb-2 flex flex-wrap items-center gap-0.5 rounded-full bg-[#f0f4f9] px-2 py-1 text-[#444746]" role="toolbar" aria-label="Formatting options">
-                <select value={fontFamily} aria-label="Font" title="Font" onChange={(event) => { setFontFamily(event.target.value); format("fontName", event.target.value); }}
-                  className="h-8 max-w-[130px] cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-[#1f1f1f14]">
-                  {COMPOSER_FONTS.map(([label, value]) => <option key={label} value={value} style={{ fontFamily: value }}>{label}</option>)}
-                </select>
-                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
-                <select value={fontSize} aria-label="Size" title="Size" onChange={(event) => { setFontSize(event.target.value); format("fontSize", event.target.value); }}
-                  className="h-8 cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-[#1f1f1f14]">
-                  {COMPOSER_SIZES.map(([label, value]) => <option key={label} value={value}>{label}</option>)}
-                </select>
-                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
-                {([["bold", "bold", "Bold (Ctrl+B)"], ["italic", "italic", "Italic (Ctrl+I)"], ["underline", "underline", "Underline (Ctrl+U)"]] as const).map(([command, icon, label]) => (
-                  <button key={command} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format(command)} aria-label={label} title={label} className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name={icon} /></button>
-                ))}
-                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format("insertOrderedList")} aria-label="Numbered list" title="Numbered list" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="listNumbered" /></button>
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format("insertUnorderedList")} aria-label="Bulleted list" title="Bulleted list" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="listBulleted" /></button>
-                <span className="mx-1 h-5 w-px bg-[#c7c7c7]" />
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { format("removeFormat"); setFontFamily(COMPOSER_FONTS[0][1]); setFontSize("3"); }} aria-label="Remove formatting" title="Remove formatting" className="flex h-8 w-8 items-center justify-center rounded hover:bg-[#1f1f1f14]"><GIcon name="formatClear" /></button>
-              </div>
+              {/* Remounted per compose mode so its font and size pickers start fresh. */}
+              <FormatToolbar key={composeMode} editorRef={composerRef} onChange={syncComposer} className="mx-4 mb-2" />
 
               <div className="flex items-center gap-3 px-4 pb-3 pt-1">
                 <button type="button" onClick={() => void sendMessage()} disabled={!canSend}

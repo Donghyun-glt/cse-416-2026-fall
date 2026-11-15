@@ -161,6 +161,7 @@ function rawMessage(headers: Record<string, string>, content: { text: string; ht
 
 export const DRAFT_SOURCE_HEADER = "X-MailFlow-Source";
 export const DRAFT_ACTION_HEADER = "X-MailFlow-Action";
+export const COMPOSE_DRAFT_HEADER = "X-MailFlow-Compose";
 const QUOTE_START = '<br><div class="gmail_quote">';
 const BODY_OPEN = '<div dir="ltr">';
 
@@ -208,7 +209,7 @@ export function readDraftContent(message: gmail_v1.Schema$Message): DraftContent
   return { action, to: action === "forward" ? cleanHeader(headers.get("to") ?? "") : "", html, text: text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), madeByMailFlow };
 }
 
-export type OutgoingInput = { action?: string; to?: string; body?: string; html?: string; draftId?: string };
+export type OutgoingInput = { action?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; html?: string; draftId?: string };
 type OutgoingFailure = { error: string; status: number };
 
 /** Reads either request format: JSON (plain text) or form data (formatting and files). */
@@ -218,7 +219,7 @@ export async function readOutgoingRequest(request: Request): Promise<{ input: Ou
   if ((request.headers.get("content-type") ?? "").includes("multipart/form-data")) {
     const form = await request.formData().catch(() => null);
     if (!form) return { error: "invalid_message", status: 400 };
-    for (const key of ["action", "to", "body", "html", "draftId"] as const) {
+    for (const key of ["action", "to", "cc", "bcc", "subject", "body", "html", "draftId"] as const) {
       const value = form.get(key);
       if (typeof value === "string") input[key] = value;
     }
@@ -233,6 +234,60 @@ export async function readOutgoingRequest(request: Request): Promise<{ input: Ou
     Object.assign(input, await request.json().catch(() => ({})));
   }
   return { input, uploads };
+}
+
+/** Splits what the user typed in a recipient field; anything that is not an address is reported, not dropped. */
+function recipientList(value: unknown) {
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const token of cleanHeader(typeof value === "string" ? value : "").split(/[,;]/).map((part) => part.trim()).filter(Boolean)) {
+    const address = emailAddress(token);
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) valid.push(address); else invalid.push(token.slice(0, 80));
+  }
+  return { list: [...new Set(valid)].join(", "), invalid };
+}
+
+/**
+ * Builds a brand-new message (the Compose window): To/Cc/Bcc, subject, body and
+ * new attachments. It answers nothing, so it starts its own conversation.
+ */
+export function buildNewMessage(input: OutgoingInput, uploads: OutgoingAttachment[], options: { draft?: boolean } = {}): { raw: string } | (OutgoingFailure & { invalid?: string[] }) {
+  const to = recipientList(input.to), cc = recipientList(input.cc), bcc = recipientList(input.bcc);
+  const subject = cleanHeader(typeof input.subject === "string" ? input.subject : "").slice(0, 500);
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  const composedHtml = body && typeof input.html === "string" && input.html.trim() ? sanitizeComposedHtml(input.html) : "";
+  const content = { text: body, html: composedHtml ? `${BODY_OPEN}${composedHtml}</div>` : undefined };
+  if (options.draft) {
+    // A draft is saved whatever state it is in: half-typed or mistyped addresses, no
+    // recipient, no text. The real headers get only the valid addresses (so Gmail and
+    // other clients show the draft normally); the fields exactly as typed travel in
+    // MailFlow's own headers so the Compose window can restore them.
+    const typed = (value: unknown) => typeof value === "string" && value.trim() ? encodedHeader(value.slice(0, 2000)) : "";
+    return { raw: rawMessage({
+      [COMPOSE_DRAFT_HEADER]: "1", [`${COMPOSE_DRAFT_HEADER}-To`]: typed(input.to), [`${COMPOSE_DRAFT_HEADER}-Cc`]: typed(input.cc), [`${COMPOSE_DRAFT_HEADER}-Bcc`]: typed(input.bcc),
+      To: to.list, Cc: cc.list, Bcc: bcc.list, Subject: subject ? encodedHeader(subject) : "",
+    }, content, uploads) };
+  }
+  const invalid = [...to.invalid, ...cc.invalid, ...bcc.invalid];
+  if (invalid.length > 0) return { error: "invalid_recipient", status: 400, invalid };
+  if (!to.list && !cc.list && !bcc.list) return { error: "recipient_missing", status: 400 };
+  if (!subject && !body && uploads.length === 0) return { error: "empty_message", status: 400 };
+  // Gmail fills in From and delivers to the Bcc addresses without showing them to the others.
+  return { raw: rawMessage({ To: to.list, Cc: cc.list, Bcc: bcc.list, Subject: subject ? encodedHeader(subject) : "" }, content, uploads) };
+}
+
+function decodedHeader(value: string) {
+  return value.replace(/=\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/gi, (_match, data: string) => Buffer.from(data, "base64").toString("utf8"));
+}
+
+/** Recovers the Compose window's fields from a draft that answers no other message. */
+export function readNewDraft(message: gmail_v1.Schema$Message) {
+  const headers = headersOf(message);
+  const field = (name: string) => decodedHeader(headers.get(`${COMPOSE_DRAFT_HEADER}-${name}`.toLowerCase()) || headers.get(name.toLowerCase()) || "");
+  const text = (bodyOf(message.payload, "text/plain") ?? "").trim();
+  let html = bodyOf(message.payload, "text/html") ?? "";
+  if (html.startsWith(BODY_OPEN) && html.endsWith("</div>")) html = html.slice(BODY_OPEN.length, -"</div>".length);
+  return { to: field("To"), cc: field("Cc"), bcc: field("Bcc"), subject: cleanHeader(headers.get("subject") ?? ""), html: html ? sanitizeComposedHtml(html) : textToHtml(text), text };
 }
 
 /**

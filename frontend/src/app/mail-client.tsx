@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleLoginButton } from "./google-login-button";
 import { GoogleCalendar } from "./google-calendar";
 import { DailyBriefing } from "./daily-briefing";
+import { ComposeWindow, type ComposeDraft } from "./compose-window";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
 import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "./mail-detail";
 
@@ -102,6 +103,8 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
   const [onlyAttachments, setOnlyAttachments] = useState(false);
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [view, setView] = useState<View>("briefing");
+  const [compose, setCompose] = useState<{ key: number; initial: ComposeDraft | null } | null>(null);
+  const [notice, setNotice] = useState("");
   const [profile, setProfile] = useState<UserProfile>({ name: "", email: "" });
   const [allPageTokens, setAllPageTokens] = useState([""]);
   const [allPageIndex, setAllPageIndex] = useState(0);
@@ -350,6 +353,13 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           return;
         }
       }
+      // A draft that answers no message is a new message: reopen it in the Compose window.
+      const composeResponse = await fetch(`/api/gmail/compose/draft?messageId=${encodeURIComponent(draftMessage.id)}`, { cache: "no-store" });
+      const composeData = await composeResponse.json().catch(() => ({})) as { draft?: ComposeDraft | null };
+      if (composeResponse.ok && composeData.draft) {
+        setCompose({ key: Date.now(), initial: composeData.draft });
+        return;
+      }
     } catch {
       // Fall through to the read-only view.
     }
@@ -584,7 +594,11 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
       <aside className="border-b border-[#e5e2dc] bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-[220px] lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center justify-between px-5 py-4 lg:block lg:px-5 lg:py-6">
           <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#5944d8] text-white"><Icon name="mail" className="h-[18px] w-[18px]" /></span><span className="text-lg font-extrabold tracking-tight">MailFlow AI</span></div>
-          <nav className="flex gap-1 lg:mt-9 lg:block lg:space-y-1.5" aria-label="Mailbox">
+          <button type="button" onClick={() => setCompose((current) => current ?? { key: Date.now(), initial: null })} aria-label="Compose" className="flex h-10 shrink-0 items-center gap-2.5 rounded-2xl bg-[#e4e0fb] px-3 text-sm font-extrabold text-[#3f2fb3] transition hover:bg-[#d7d1f8] hover:shadow-[0_2px_8px_rgba(89,68,216,0.25)] lg:mt-7 lg:h-12 lg:px-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            <span className="hidden sm:inline">Compose</span>
+          </button>
+          <nav className="flex gap-1 lg:mt-5 lg:block lg:space-y-1.5" aria-label="Mailbox">
             <button type="button" onClick={() => changeView("briefing")} className={`flex items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "briefing" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="sun" /><span className="hidden sm:inline">Daily Briefing</span></button>
             <button type="button" onClick={() => changeView("calendar")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "calendar" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="calendar" /><span className="hidden sm:inline">Calendar</span></button>
             <button type="button" onClick={() => changeView("inbox")} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-bold transition lg:w-full ${view === "inbox" ? "bg-[#eeecfb] text-[#5742d5]" : "text-[#747168] hover:bg-[#f6f5f1]"}`}><Icon name="inbox" /><span className="hidden sm:inline">Inbox</span></button>
@@ -701,6 +715,21 @@ export function MailClient({ initialConnected, loginError }: { initialConnected:
           </>
         )}
       </div>
+      {compose && <ComposeWindow key={compose.key} initial={compose.initial}
+        onClose={(change) => {
+          setCompose(null);
+          if (change === "none") return;
+          setNotice(change === "saved" ? "Draft saved" : "Draft discarded");
+          window.setTimeout(() => setNotice(""), 4000);
+          if (view === "drafts") void loadMessages("drafts", false, allPageTokens[allPageIndex]);
+        }}
+        onSent={() => {
+          setCompose(null);
+          setNotice("Message sent");
+          window.setTimeout(() => setNotice(""), 4000);
+          if (view === "sent" || view === "drafts") void loadMessages(view, false, allPageTokens[allPageIndex]);
+        }} />}
+      {notice && <p role="status" className="fixed bottom-6 left-6 z-50 rounded-lg bg-[#1f1f1f] px-4 py-3 text-sm text-white shadow-lg">{notice}</p>}
     </main>
   );
 }
