@@ -32,6 +32,7 @@ function findBody(part: gmail_v1.Schema$MessagePart | undefined, mimeType: strin
  *   tone?: "professional" | "friendly" | "concise" | "formal",
  *   length?: "short" | "medium" | "long",
  *   instructions?: string,
+ *   currentDraft?: string, // with instructions: revise this draft instead of starting over
  *   regenerate?: boolean   // skip the cache and ask the model again
  * }
  * Returns: { draft: string, model: string, cached: boolean, generatedAt: string }
@@ -51,7 +52,8 @@ export async function POST(
   const input = await request.json().catch(() => ({})) as { regenerate?: unknown };
   const options = parseReplyDraftOptions(input);
   if (!options) return NextResponse.json({ error: "invalid_options" }, { status: 400 });
-  const regenerate = input.regenerate === true;
+  // A revision depends on the draft on screen, so a stored result for the same instruction is not reusable.
+  const regenerate = input.regenerate === true || Boolean(options.currentDraft);
   const instructions = options.instructions ?? "";
 
   const { id } = await params;

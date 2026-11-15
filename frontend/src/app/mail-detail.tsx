@@ -61,6 +61,20 @@ const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 // Slider stops for the AI panel (left -> right).
 const TONE_STOPS: ReplyTone[] = ["friendly", "professional", "formal"];
 const LENGTH_STOPS: ReplyLength[] = ["short", "medium", "long"];
+// The reply panel as the user last left it (draft with manual edits, tone, length and
+// request). Stored per user + message on the server so it comes back on any device.
+type SavedReply = { draft: string; tone: ReplyTone; length: ReplyLength; instructions: string };
+function parseSavedReply(value: unknown): SavedReply | null {
+  const state = (value && typeof value === "object" ? value : {}) as Partial<SavedReply>;
+  if (typeof state.draft !== "string" || !state.draft.trim()) return null;
+  return {
+    draft: state.draft,
+    tone: TONE_STOPS.includes(state.tone as ReplyTone) ? state.tone as ReplyTone : "professional",
+    length: LENGTH_STOPS.includes(state.length as ReplyLength) ? state.length as ReplyLength : "medium",
+    instructions: typeof state.instructions === "string" ? state.instructions.slice(0, 500) : "",
+  };
+}
+
 const toneLabel: Record<ReplyTone, string> = { friendly: "Friendly", professional: "Professional", concise: "Concise", formal: "Formal" };
 const lengthLabel: Record<ReplyLength, string> = { short: "Short", medium: "Medium", long: "Detailed" };
 
@@ -464,6 +478,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const showAiPanel = !message.draft && !sentByMe;
   const [aiTone, setAiTone] = useState<ReplyTone>("professional");
   const [aiLength, setAiLength] = useState<ReplyLength>("medium");
+  const [aiInstructions, setAiInstructions] = useState("");
   const [suggestion, setSuggestion] = useState<{ status: "skipped" | "loading" | "ready" | "error" | "sent"; draft: string; cached: boolean; message: string }>(
     { status: message.draft || sentByMe || automated ? "skipped" : "loading", draft: "", cached: false, message: "" },
   );
@@ -776,11 +791,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     }
   };
 
-  const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
+  const requestDraft = useCallback(async (input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean; instructions?: string; currentDraft?: string }) => {
     const response = await fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/reply-draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...input, instructions: "" }),
+      body: JSON.stringify({ ...input, instructions: input.instructions ?? "" }),
     });
     const result = await response.json().catch(() => ({})) as { draft?: string; cached?: boolean; error?: string; detail?: string };
     if (!response.ok || !result.draft) {
@@ -790,32 +805,96 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     return { draft: result.draft, cached: Boolean(result.cached) };
   }, [message.id]);
 
-  const loadSuggestion = useCallback((input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean }) => {
+  const loadSuggestion = useCallback((input: { tone: ReplyTone; length: ReplyLength; regenerate: boolean; instructions?: string; currentDraft?: string }) => {
     let cancelled = false;
     requestDraft(input)
       .then((result) => { if (!cancelled) setSuggestion({ status: "ready", draft: result.draft, cached: result.cached, message: "" }); })
-      .catch((suggestError) => { if (!cancelled) setSuggestion({ status: "error", draft: "", cached: false, message: suggestError instanceof Error ? suggestError.message : "AI draft could not be generated." }); });
+      .catch((suggestError) => {
+        if (cancelled) return;
+        const message = suggestError instanceof Error ? suggestError.message : "AI draft could not be generated.";
+        // A failed revision must not throw away the draft the user was editing.
+        setSuggestion((current) => input.currentDraft ? { ...current, status: "ready", message } : { status: "error", draft: "", cached: false, message });
+      });
     return () => { cancelled = true; };
   }, [requestDraft]);
 
-  // Generate a suggested reply as soon as a person-to-person message is opened
-  // (MailDetail is keyed by message id, so this runs once per opened message).
-  // Cached on the server, so reopening the same message costs no LLM call.
+  // Reply panel persistence. `storedReply` mirrors what the server holds ("null" = nothing),
+  // `pendingReply` is a change not yet written (null = delete, undefined = nothing to write).
+  const replyStateUrl = `/api/gmail/messages/${encodeURIComponent(message.id)}/reply-state`;
+  const replyTouched = useRef(false);
+  const storedReply = useRef("null");
+  const pendingReply = useRef<SavedReply | null | undefined>(undefined);
+  const flushReplyState = useCallback(() => {
+    const next = pendingReply.current;
+    if (next === undefined) return;
+    pendingReply.current = undefined;
+    storedReply.current = JSON.stringify(next);
+    // keepalive lets the last write finish even when it is sent while leaving the message.
+    void fetch(replyStateUrl, next ? { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next), keepalive: true } : { method: "DELETE", keepalive: true })
+      .then((response) => { if (!response.ok) storedReply.current = ""; })
+      .catch(() => { storedReply.current = ""; }); // Unknown server state: write again on the next change.
+  }, [replyStateUrl]);
+
+  // Opening a message (MailDetail is keyed by message id): restore the panel the user
+  // left, with no LLM call. Only a message they have not touched gets a fresh AI draft,
+  // which is itself cached on the server.
   useEffect(() => {
-    if (message.draft || sentByMe || automated) return;
-    return loadSuggestion({ tone: "professional", length: "medium", regenerate: false });
-  }, [message.draft, sentByMe, automated, loadSuggestion]);
+    if (message.draft || sentByMe) return;
+    const controller = new AbortController();
+    let cancelGeneration: (() => void) | undefined;
+    void fetch(replyStateUrl, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<{ state?: unknown }> : null)
+      .catch(() => null)
+      .then((data) => {
+        if (controller.signal.aborted || replyTouched.current) return;
+        const saved = parseSavedReply(data?.state);
+        if (saved) {
+          storedReply.current = JSON.stringify(saved);
+          setAiTone(saved.tone); setAiLength(saved.length); setAiInstructions(saved.instructions);
+          setSuggestion({ status: "ready", draft: saved.draft, cached: true, message: "" });
+        } else if (!automated) {
+          cancelGeneration = loadSuggestion({ tone: "professional", length: "medium", regenerate: false });
+        }
+      });
+    return () => { controller.abort(); cancelGeneration?.(); };
+  }, [message.draft, sentByMe, automated, loadSuggestion, replyStateUrl]);
+
+  // Save shortly after the panel settles on a finished draft; loading and error states
+  // never overwrite what is stored. A sent or emptied reply removes the stored state.
+  useEffect(() => {
+    if (suggestion.status !== "ready" && suggestion.status !== "sent") return;
+    const next: SavedReply | null = suggestion.status === "ready" && suggestion.draft.trim()
+      ? { draft: suggestion.draft, tone: aiTone, length: aiLength, instructions: aiInstructions.trim() } : null;
+    if (suggestion.status !== "sent" && JSON.stringify(next) === storedReply.current) { pendingReply.current = undefined; return; }
+    pendingReply.current = next;
+    const timer = window.setTimeout(flushReplyState, 800);
+    return () => window.clearTimeout(timer);
+  }, [suggestion.status, suggestion.draft, aiTone, aiLength, aiInstructions, flushReplyState]);
+  // Leaving the message before the timer fires still writes the last state.
+  useEffect(() => flushReplyState, [flushReplyState]);
 
   const changeSuggestionOptions = (tone: ReplyTone, length: ReplyLength) => {
+    replyTouched.current = true;
     setAiTone(tone);
     setAiLength(length);
     setSuggestion((current) => ({ ...current, status: "loading", message: "" }));
-    loadSuggestion({ tone, length, regenerate: false });
+    loadSuggestion({ tone, length, regenerate: false, instructions: aiInstructions.trim() });
   };
 
   const regenerateSuggestion = () => {
+    replyTouched.current = true;
     setSuggestion((current) => ({ ...current, status: "loading", message: "" }));
-    loadSuggestion({ tone: aiTone, length: aiLength, regenerate: true });
+    loadSuggestion({ tone: aiTone, length: aiLength, regenerate: true, instructions: aiInstructions.trim() });
+  };
+
+  // Free-form request to the AI ("write it in English"): revises the draft on screen, including manual edits.
+  const applyInstructions = () => {
+    const instructions = aiInstructions.trim();
+    if (!instructions || suggestion.status === "loading") return;
+    replyTouched.current = true;
+    const currentDraft = suggestion.draft.trim();
+    setSuggestion((current) => ({ ...current, status: "loading", message: "" }));
+    loadSuggestion({ tone: aiTone, length: aiLength, regenerate: true, instructions, currentDraft: currentDraft || undefined });
   };
 
   const sendSuggestion = async () => {
@@ -1210,14 +1289,22 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                 {suggestion.status === "error" && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
                 {suggestion.status === "ready" && suggestion.message && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
 
+                <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); applyInstructions(); }}>
+                  <input value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} maxLength={500} disabled={suggestion.status === "loading"}
+                    aria-label="Ask AI to change this reply" placeholder="Ask AI to change it, e.g. write it in English"
+                    className="h-10 min-w-0 flex-1 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm text-[#1f1f1f] outline-none focus:ring-2 focus:ring-[#5b4bd6]/30 disabled:text-[#9a9a9a]" />
+                  <button type="submit" disabled={!aiInstructions.trim() || suggestion.status === "loading"}
+                    className="h-10 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">Apply</button>
+                </form>
+
                 <div className="mt-4 space-y-3">
                   <label className="block text-xs text-[#5e5e5e]">
-                    <span className="flex justify-between"><span>Friendly</span><span className="font-medium text-[#1f1f1f]">{toneLabel[aiTone]}</span><span>Formal</span></span>
+                    <span className="flex justify-between">{TONE_STOPS.map((stop) => <span key={stop} className={stop === aiTone ? "font-medium text-[#1f1f1f]" : ""}>{toneLabel[stop]}</span>)}</span>
                     <input type="range" min={0} max={TONE_STOPS.length - 1} step={1} value={TONE_STOPS.indexOf(aiTone)} disabled={suggestion.status === "loading"}
                       onChange={(event) => changeSuggestionOptions(TONE_STOPS[Number(event.target.value)], aiLength)} aria-label="Reply tone" className="mt-1 w-full accent-[#5b4bd6]" />
                   </label>
                   <label className="block text-xs text-[#5e5e5e]">
-                    <span className="flex justify-between"><span>Short</span><span className="font-medium text-[#1f1f1f]">{lengthLabel[aiLength]}</span><span>Detailed</span></span>
+                    <span className="flex justify-between">{LENGTH_STOPS.map((stop) => <span key={stop} className={stop === aiLength ? "font-medium text-[#1f1f1f]" : ""}>{lengthLabel[stop]}</span>)}</span>
                     <input type="range" min={0} max={LENGTH_STOPS.length - 1} step={1} value={LENGTH_STOPS.indexOf(aiLength)} disabled={suggestion.status === "loading"}
                       onChange={(event) => changeSuggestionOptions(aiTone, LENGTH_STOPS[Number(event.target.value)])} aria-label="Reply length" className="mt-1 w-full accent-[#5b4bd6]" />
                   </label>

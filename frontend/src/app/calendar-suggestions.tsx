@@ -132,18 +132,12 @@ export function CalendarSuggestions({ messageId, account, onAnalyzedPriority }: 
     }, 0);
     return () => { clearTimeout(timeout); controller.abort(); };
   }, [messageId, retry, onAnalyzedPriority]);
-  const importanceLabel = { high: "Important", normal: "For your information", low: "Low importance" };
-  const relevanceLabel = { recipient_action: "Action required", recipient_info: "Relevant information", optional: "Optional", unrelated: "Not directed at you", unclear: "Needs your review" };
-  const kindLabel = { action: "Action", deadline: "Deadline", preparation: "Preparation", consequence: "Consequence", logistics: "Logistics", change: "Schedule change", information: "Information" };
   const keys = candidateKeys(candidates);
   return <section className="mb-4 space-y-4 rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-sm" aria-label="Email insights">
     <h2 className="text-xs font-bold uppercase tracking-wide text-[#5944d8]">Email insights</h2>
     {analysis && <>
-      <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className={`rounded-full px-3 py-1 ${analysis.importance === "high" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>{importanceLabel[analysis.importance]}</span><span className="rounded-full bg-[#eeecfb] px-3 py-1 text-[#5944d8]">{relevanceLabel[analysis.relevance]}</span></div>
       <p className="text-sm leading-6">{analysis.reason}</p>
-      {analysis.keyPoints.length > 0 && <div><h3 className="mb-2 text-sm font-bold">What matters</h3><ul className="space-y-3">{analysis.keyPoints.map((point, index) => <li key={index} className={`rounded-lg border p-3 ${point.importance === "critical" ? "border-amber-200 bg-amber-50" : "border-[#e3e3e3]"}`}><span className="text-[10px] font-bold uppercase tracking-wide text-[#666]">{kindLabel[point.kind]}{point.owner === "other" ? " · Someone else's action" : point.owner === "unclear" ? " · Confirm who this applies to" : ""}</span><p className="mt-1 text-sm">{point.text}</p><details className="mt-2 text-xs text-[#666]"><summary className="cursor-pointer text-[#5944d8]">Source text</summary><blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-[#b9acf4] pl-2">{point.evidence}</blockquote></details></li>)}</ul></div>}
       {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">{note}</p>)}
-      <p className="text-[10px] text-[#777]">AI-generated. Verify before acting.</p>
     </>}
     <div className="border-t border-[#e3e3e3] pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[#5944d8]">Suggested events</h3>{status && <p role="status" className="text-xs text-[#666]">{status}</p>}</div>
     {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-[#5944d8] underline">Retry analysis</button>}

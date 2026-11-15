@@ -69,3 +69,15 @@ test("derives greeting and sign-off names from headers", async () => {
   );
   assert.match(prompt, /name "Alex" on its own line/);
 });
+
+test("a revision request carries the current draft and outranks the default language rule", async () => {
+  const { buildReplyPrompt, parseReplyDraftOptions } = await modulePromise;
+  const options = parseReplyDraftOptions({ instructions: "write it in English", currentDraft: "  오늘 오후 4시에 뵙겠습니다.  " });
+  assert.equal(options.currentDraft, "오늘 오후 4시에 뵙겠습니다.");
+  assert.equal(parseReplyDraftOptions({ currentDraft: "ignored without a request" }).currentDraft, undefined);
+  const prompt = buildReplyPrompt({ subject: "bookstore", from: "Kim <kim@example.com>", to: "me@example.com", date: "", body: "We should meet at 4pm." }, options);
+  assert.match(prompt, /write it in English/);
+  assert.match(prompt, /takes priority over the rules above/);
+  assert.ok(prompt.indexOf("오늘 오후 4시에 뵙겠습니다.") > prompt.indexOf("Current draft:"));
+  assert.ok(prompt.indexOf("Current draft:") < prompt.indexOf("Original email:"));
+});

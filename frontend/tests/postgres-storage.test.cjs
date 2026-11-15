@@ -35,3 +35,13 @@ test("OAuth cookie contains an opaque identifier while encrypted tokens stay in 
   assert.match(session, /sessionHash\(sessionId\)/);
   assert.match(session, /createCipheriv\("aes-256-gcm"/);
 });
+
+test("the reply panel state is stored once per user and message and removed with the user", () => {
+  const migration = source("db/migrations/003_reply_panel_states.sql");
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS reply_panel_states/i);
+  assert.match(migration, /PRIMARY KEY \(user_id, gmail_message_id\)/i);
+  assert.match(migration, /REFERENCES users\(id\) ON DELETE CASCADE/i);
+  const storage = source("src/lib/mailflow-db.ts");
+  assert.match(storage, /INSERT INTO reply_panel_states[\s\S]+ON CONFLICT \(user_id, gmail_message_id\) DO UPDATE/);
+  assert.match(storage, /DELETE FROM reply_panel_states WHERE user_id = \$1 AND gmail_message_id = \$2/);
+});

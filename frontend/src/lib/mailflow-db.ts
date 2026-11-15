@@ -159,3 +159,37 @@ export async function saveReplyDraft(input: {
       last_seen_at = NOW()
   `, [input.userId, input.gmailMessageId, input.tone, input.length, input.instructions, input.draft, input.model]);
 }
+
+export type ReplyPanelState = {
+  draft: string;
+  tone: string;
+  length: string;
+  instructions: string;
+};
+
+/** The reply panel as the user last left it for this message, or null if they never changed it. */
+export async function getReplyPanelState(userId: number, gmailMessageId: string): Promise<ReplyPanelState | null> {
+  const result = await query<ReplyPanelState>(`
+    SELECT draft, tone, length, instructions
+    FROM reply_panel_states
+    WHERE user_id = $1 AND gmail_message_id = $2
+  `, [userId, gmailMessageId]);
+  return result.rows[0] ?? null;
+}
+
+export async function saveReplyPanelState(input: ReplyPanelState & { userId: number; gmailMessageId: string }) {
+  await query(`
+    INSERT INTO reply_panel_states (user_id, gmail_message_id, draft, tone, length, instructions, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    ON CONFLICT (user_id, gmail_message_id) DO UPDATE SET
+      draft = EXCLUDED.draft,
+      tone = EXCLUDED.tone,
+      length = EXCLUDED.length,
+      instructions = EXCLUDED.instructions,
+      updated_at = NOW()
+  `, [input.userId, input.gmailMessageId, input.draft, input.tone, input.length, input.instructions]);
+}
+
+export async function deleteReplyPanelState(userId: number, gmailMessageId: string) {
+  await query("DELETE FROM reply_panel_states WHERE user_id = $1 AND gmail_message_id = $2", [userId, gmailMessageId]);
+}
