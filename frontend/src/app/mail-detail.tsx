@@ -1248,7 +1248,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       {/* ---------- Right column: AI reply panel ---------- */}
       {showAiPanel && (
         <aside className="mx-4 mt-6 lg:sticky lg:top-16 lg:mx-0 lg:mt-0">
-          <CalendarSuggestions messageId={message.id} account={myEmail} onAnalyzedPriority={onAnalyzedPriority} />
+          <CalendarSuggestions messageId={message.id} onAnalyzedPriority={onAnalyzedPriority} />
           <div className="rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
             <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#5b4bd6]">
               <GIcon name="sparkle" className="h-4 w-4" />Suggested reply

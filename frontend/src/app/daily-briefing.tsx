@@ -6,48 +6,48 @@ import { PRIORITIES, type Priority } from "@/lib/mail-priority";
 import { formatSender, initials, type Mail } from "./mail-detail";
 
 // What a briefing card shows beyond the list data: the AI summary and any event the
-// message suggests. It comes from the same full-body analysis the message page uses.
-type BriefingEvent = { key: string; title: string; date: string; startTime: string | null };
+// message suggests. Both are decided once on the server (the first time a message is
+// analysed, normally here) and stored, so this only reads them back afterwards.
+type BriefingEvent = { key: string; title: string; date: string; startTime: string | null; status: "pending" | "saved" | "dismissed" };
 type Insight = { summary: string; events: BriefingEvent[] };
 type InsightResult = { insight: Insight | null; priority?: Priority };
+type StoredEventState = { status?: BriefingEvent["status"]; details?: { title?: string; allDay?: boolean; date?: string; start?: string } };
 
-// Each analysis is one LLM call, so results are kept for this tab (memory) and this
-// browser (localStorage). Email content is not written to the MailFlow database.
-const CACHE_PREFIX = "mailflow-insight:v1:";
+// Shown instantly when the briefing is reopened in this tab, then refreshed from the server.
 const memory = new Map<string, Insight>();
-const MAX_PARALLEL = 2;
-
-function cachedInsight(id: string) {
-  const known = memory.get(id);
-  if (known) return known;
-  try {
-    const stored = JSON.parse(localStorage.getItem(CACHE_PREFIX + id) ?? "null") as Insight | null;
-    if (stored && typeof stored.summary === "string" && Array.isArray(stored.events)) { memory.set(id, stored); return stored; }
-  } catch { /* Storage is optional. */ }
-  return null;
-}
+const MAX_PARALLEL = 3;
 
 async function loadInsight(id: string): Promise<InsightResult> {
-  const cached = cachedInsight(id);
-  if (cached) return { insight: cached };
   for (let attempt = 0; attempt < 3; attempt++) {
     const response = await fetch(`/api/gmail/messages/${encodeURIComponent(id)}/calendar-suggestions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     if (response.status === 429) { await new Promise((resolve) => window.setTimeout(resolve, 15000)); continue; } // AI rate limit: wait, then retry.
-    const data = await response.json().catch(() => null) as { analysis?: { summary?: string; reason?: string }; candidates?: CalendarSuggestion[]; priority?: Priority; prioritySaved?: boolean } | null;
-    if (!response.ok || !data?.analysis) return { insight: null }; // Not analysable (or failed): the card keeps Gmail's snippet.
+    const data = await response.json().catch(() => null) as { analysis?: { summary?: string; reason?: string }; candidates?: CalendarSuggestion[]; eventStates?: Record<string, StoredEventState>; priority?: Priority; prioritySaved?: boolean } | null;
+    if (!response.ok || !data?.analysis) return { insight: memory.get(id) ?? null }; // Not analysable (or failed): the card keeps Gmail's snippet.
     const candidates = data.candidates ?? [];
     const keys = candidateKeys(candidates);
-    const insight: Insight = { summary: data.analysis.summary || data.analysis.reason || "", events: candidates.map((candidate, index) => ({ key: keys[index], title: candidate.title, date: candidate.date, startTime: candidate.startTime })) };
+    const insight: Insight = {
+      summary: data.analysis.summary || data.analysis.reason || "",
+      events: candidates.map((candidate, index) => {
+        // The user's last edit of the event wins over what the email said.
+        const state = data.eventStates?.[keys[index]];
+        const edited = state?.details ?? {};
+        const timed = edited.allDay === false && typeof edited.start === "string" && edited.start.length >= 16;
+        return {
+          key: keys[index], status: state?.status ?? "pending", title: edited.title || candidate.title,
+          date: timed ? edited.start!.slice(0, 10) : edited.allDay && edited.date ? edited.date : candidate.date,
+          startTime: timed ? edited.start!.slice(11, 16) : edited.allDay ? null : candidate.startTime,
+        };
+      }),
+    };
     memory.set(id, insight);
-    try { localStorage.setItem(CACHE_PREFIX + id, JSON.stringify(insight)); } catch { /* Storage is optional. */ }
     return { insight, priority: data.prioritySaved && PRIORITIES.includes(data.priority as Priority) ? data.priority : undefined };
   }
-  return { insight: null };
+  return { insight: memory.get(id) ?? null };
 }
 
 /** Loads insights for the listed messages a few at a time; `undefined` = still loading, `null` = unavailable. */
 function useInsights(ids: string[], onPriority: (id: string, priority: Priority) => void) {
-  const [insights, setInsights] = useState<Record<string, Insight | null>>({});
+  const [insights, setInsights] = useState<Record<string, Insight | null>>(() => Object.fromEntries(ids.flatMap((id) => memory.has(id) ? [[id, memory.get(id)!]] : [])));
   const started = useRef(new Set<string>());
   const queue = useRef<string[]>([]);
   const active = useRef(0);
@@ -80,10 +80,10 @@ function useInsights(ids: string[], onPriority: (id: string, priority: Priority)
   return insights;
 }
 
-const sections: Record<Priority, { label: string; hint: string; header: string; dot: string }> = {
-  urgent: { label: "Urgent", hint: "Needs you soon", header: "bg-[#fce9e9] text-[#a82f35]", dot: "bg-[#d2444b]" },
-  fyi: { label: "FYI", hint: "Worth knowing", header: "bg-[#fbf2dc] text-[#89651f]", dot: "bg-[#c9952b]" },
-  low: { label: "Low Priority", hint: "Can wait", header: "bg-[#e8f1ee] text-[#416c60]", dot: "bg-[#5d9483]" },
+const sections: Record<Priority, { label: string; header: string; dot: string }> = {
+  urgent: { label: "Urgent", header: "bg-[#fce9e9] text-[#a82f35]", dot: "bg-[#d2444b]" },
+  fyi: { label: "FYI", header: "bg-[#fbf2dc] text-[#89651f]", dot: "bg-[#c9952b]" },
+  low: { label: "Low Priority", header: "bg-[#e8f1ee] text-[#416c60]", dot: "bg-[#5d9483]" },
 };
 const avatarColors = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"];
 
@@ -101,15 +101,11 @@ function localToday() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 /** The first suggested event the user still has to decide on, or one they already added. */
-function eventStatus(insight: Insight | null | undefined, account: string, messageId: string) {
-  let added: BriefingEvent | null = null;
-  for (const event of insight?.events ?? []) {
-    let state: string | null = null;
-    try { state = localStorage.getItem(`mailflow-calendar:${account}:${messageId}:${event.key}`); } catch { /* Storage is optional. */ }
-    if (state === "dismissed") continue;
-    if (state === "saved") { added ??= event; continue; }
-    if (event.date >= localToday()) return { event, added: false };
-  }
+function eventStatus(insight: Insight | null | undefined) {
+  const events = insight?.events ?? [];
+  const open = events.find((event) => event.status === "pending" && event.date >= localToday());
+  if (open) return { event: open, added: false };
+  const added = events.find((event) => event.status === "saved");
   return added ? { event: added, added: true } : null;
 }
 
@@ -117,9 +113,9 @@ function CalendarGlyph() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></svg>;
 }
 
-function BriefingCard({ message, insight, account, color, onOpen }: { message: Mail; insight: Insight | null | undefined; account: string; color: string; onOpen: (message: Mail) => void }) {
+function BriefingCard({ message, insight, color, onOpen }: { message: Mail; insight: Insight | null | undefined; color: string; onOpen: (message: Mail) => void }) {
   const sender = formatSender(message.from);
-  const calendar = eventStatus(insight, account, message.id);
+  const calendar = eventStatus(insight);
   return <button type="button" onClick={() => onOpen(message)}
     className={`block w-full rounded-xl border p-3.5 text-left transition hover:-translate-y-px hover:shadow-[0_4px_14px_rgba(31,31,27,0.09)] ${message.unread ? "border-[#dcd8ee] bg-white" : "border-[#e6e4de] bg-[#f6f5f2]"}`}>
     <span className="flex items-center gap-2.5">
@@ -140,23 +136,22 @@ function BriefingCard({ message, insight, account, color, onOpen }: { message: M
   </button>;
 }
 
-/** Today's inbox as three priority sections, each card carrying an AI summary and a calendar flag. */
-export function DailyBriefing({ messages, account, onOpen, onPriority }: { messages: Mail[]; account: string; onOpen: (message: Mail) => void; onPriority: (id: string, priority: Priority) => void }) {
+/** Today's inbox as three priority columns, each card carrying an AI summary and a calendar flag. */
+export function DailyBriefing({ messages, onOpen, onPriority }: { messages: Mail[]; onOpen: (message: Mail) => void; onPriority: (id: string, priority: Priority) => void }) {
   const insights = useInsights(messages.map((message) => message.id), onPriority);
-  return <div className="grid gap-4 lg:grid-cols-3">
+  return <div className="grid gap-x-5 gap-y-6 lg:grid-cols-3">
     {PRIORITIES.map((priority) => {
       const group = messages.filter((message) => message.priority === priority);
       const section = sections[priority];
-      return <section key={priority} aria-label={`${section.label} emails`} className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[#e1ded8] bg-white shadow-[0_2px_8px_rgba(31,31,27,0.04)]">
-        <header className={`flex items-center gap-2 px-4 py-3 ${section.header}`}>
+      return <section key={priority} aria-label={`${section.label} emails`} className="min-w-0">
+        <header className={`mb-3 flex items-center gap-2 rounded-full px-4 py-2 ${section.header}`}>
           <span className={`h-2 w-2 rounded-full ${section.dot}`} aria-hidden="true" />
           <h3 className="text-xs font-extrabold uppercase tracking-wide">{section.label}</h3>
-          <span className="text-xs font-semibold opacity-70">{section.hint}</span>
-          <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-xs font-extrabold">{group.length}</span>
+          <span className="ml-auto text-xs font-extrabold">{group.length}</span>
         </header>
-        <div className="flex flex-1 flex-col gap-2.5 p-3">
-          {group.length === 0 ? <p className="py-8 text-center text-sm text-[#a5a299]">Nothing here today</p>
-            : group.map((message) => <BriefingCard key={message.id} message={message} insight={insights[message.id]} account={account} color={avatarColors[messages.indexOf(message) % avatarColors.length]} onOpen={onOpen} />)}
+        <div className="space-y-2.5">
+          {group.length === 0 ? <p className="py-6 text-center text-sm text-[#a5a299]">Nothing here today</p>
+            : group.map((message) => <BriefingCard key={message.id} message={message} insight={insights[message.id]} color={avatarColors[messages.indexOf(message) % avatarColors.length]} onOpen={onOpen} />)}
         </div>
       </section>;
     })}

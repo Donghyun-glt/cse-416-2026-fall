@@ -7,10 +7,12 @@ import { parseGmailMessage } from "@/lib/gmail-message";
 import { emailBodyToText } from "@/lib/reply-draft";
 import { generateText, GeminiError, geminiModel } from "@/lib/gemini";
 import { ANALYSIS_VERSION, analysisPrompt, analysisSchema, validateMailAnalysis, type AnalysisContext } from "@/lib/mail-analysis";
-import { recordPriority, upsertUser } from "@/lib/mailflow-db";
+import { getCalendarEventStates, getMessageInsight, recordPriority, saveMessageInsight, upsertUser, type CalendarEventState } from "@/lib/mailflow-db";
 
-// Small, short-lived, account-scoped cache. No email body or analysis is written
-// to the database. Revalidate dates/urgency at each read, even for cached output.
+// A message is analysed once. The validated result (summary, suggested events, review
+// notes) is stored per user + message and returned as-is afterwards, so its category
+// and events never change on their own. The memory cache below only covers the short
+// window before that first result is stored, and requests that race each other.
 const cache = new Map<string, { raw: unknown; expires: number }>();
 const pending = new Map<string, Promise<unknown>>();
 async function analyze(source: string, context: AnalysisContext, key: string) {
@@ -38,6 +40,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   let timeZone: string | undefined;
   if (typeof options.timeZone === "string" && options.timeZone.length < 100) {
     try { new Intl.DateTimeFormat("en", { timeZone: options.timeZone }); timeZone = options.timeZone; } catch { /* Reference dates fall back to UTC with a review warning. */ }
+  }
+  const storedResponse = async (userId: number) => {
+    const stored = await getMessageInsight(userId, id) as { candidates?: unknown[] } | null;
+    if (!stored) return null;
+    const eventStates = await getCalendarEventStates(userId, id);
+    return NextResponse.json({ analysis: stored, candidates: stored.candidates ?? [], eventStates, stored: true, prioritySaved: false, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
+  };
+  if (session.userId !== null) {
+    try {
+      const response = await storedResponse(session.userId);
+      if (response) return response; // Already decided: no Gmail fetch, no LLM call, no priority change.
+    } catch { console.error("Stored message insight could not be read"); } // Fall back to a live analysis.
   }
   try {
     const auth = createGoogleOAuthClient(); auth.setCredentials(session.tokens);
@@ -67,9 +81,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // An automatic result can never overwrite a manual priority, including races.
     let priority = analysis.priority;
     let prioritySaved = false;
+    const eventStates: Record<string, CalendarEventState> = {};
     try {
       const userId = session.userId ?? await upsertUser(recipient);
       if (session.userId === null && sessionId) await attachGmailSessionToUser(sessionId, userId);
+      // Key points quote the email at length and are not shown anywhere, so they are not kept.
+      const first = await saveMessageInsight({ userId, gmailMessageId: id, version: ANALYSIS_VERSION, analysis: { ...analysis, keyPoints: [] } })
+        .catch(() => { console.error("Message insight could not be stored"); return true; });
+      if (!first) {
+        // Another request decided this message a moment ago; its result is the one that stands.
+        const response = await storedResponse(userId);
+        if (response) return response;
+      }
       const storedReason = analysis.priority === "urgent" ? "Full-body analysis found a personal action with a near-term date or active blocker"
         : analysis.importance === "high" ? "Full-body analysis found a consequential personal action or important information"
         : analysis.importance === "low" ? "Full-body analysis found optional or unrelated content without a personal obligation"
@@ -77,7 +100,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       priority = await recordPriority({ userId, gmailMessageId: id, priority: analysis.priority, source: "automatic", reason: storedReason, signals: analysis.signals }) ?? analysis.priority;
       prioritySaved = true;
     } catch { console.error("Content analysis priority could not be saved"); }
-    return NextResponse.json({ analysis, candidates: analysis.candidates, priority, prioritySaved, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ analysis, candidates: analysis.candidates, eventStates, priority, prioritySaved, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof GeminiError) return NextResponse.json({ error: error.code }, { status: error.code === "rate_limited" ? 429 : 503 });
     console.error("Email content analysis failed");

@@ -53,11 +53,17 @@ export default function PrivacyPolicy() {
             automatic rules assigned it, a short fixed explanation (for example, &quot;A direct request includes
             time-sensitive language&quot;), and a history of priority changes.
           </li>
+          <li>
+            <strong>AI results for your messages:</strong> for each message MailFlow analyses, the AI-written summary, the
+            suggested calendar events with the short quotes from the email that support them, and what you last did with
+            each suggestion (your edits, added or dismissed); and the reply draft you last left for a message. These are
+            kept so they stay the same each time you open the message, on any device.
+          </li>
           <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used to make Gmail and Google Calendar requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>
-          We do not store message subjects, bodies or attachments. Messages are fetched from Gmail when you open the
-          app and are not kept afterwards. Calendar events are fetched when you open the Calendar screen and are not stored in our database.
+          We do not store full message bodies or attachments. Messages are fetched from Gmail when you open the
+          app and are not kept afterwards, apart from the AI results listed above. Calendar events are fetched when you open the Calendar screen and are not stored in our database.
         </p>
       </section>
 

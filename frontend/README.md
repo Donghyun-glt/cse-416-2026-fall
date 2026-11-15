@@ -74,14 +74,16 @@ correct the extracted values and **Save to Google Calendar** requires explicit
 confirmation. Missing end times/time zones need input. Date-only deadlines can be
 all-day events. Location is copied only with supporting evidence. Attachments and
 recurring schedules are not parsed. Analysis is capped at 40,000 characters and
-flags truncation. A bounded account-scoped memory cache retains generated analysis
-for up to 10 minutes; generated insights and email bodies are not stored in the
-DB. Only fixed priority explanations and classification signals are persisted.
+flags truncation. Each message is analysed once: the validated result (summary,
+suggested events, review notes) is stored in `message_insights` and returned unchanged
+afterwards, so a message's automatic priority and suggested events never change on
+their own. Only a manual priority change moves a message after that.
 
 Email suggestions use stable Google event IDs so retries for the same message/
 date/time/type do not create another event. This does not deduplicate independently
-created events or the same appointment in different messages. Browser flags remember
-dismissal/saving; no migration is needed.
+created events or the same appointment in different messages. The user's last edits
+and the added/dismissed state of each suggestion are stored in `calendar_event_states`
+(migration `004_message_insights.sql`).
 
 `npm test` covers validators, priorities, manual overrides, dates, time zones and
 approval/retry behavior. The synthetic multilingual fixtures also exercise the
@@ -110,8 +112,12 @@ PostgreSQL stores MailFlow-owned data:
 - The rule explanation and boolean signals used by automatic classification
 - An append-only history of priority changes
 - Encrypted Google OAuth session tokens and their expiration times
+- Per message, decided once and then fixed: the AI summary, the suggested
+  calendar events (with the short email quotes that support them) and review notes
+- Per suggested event: the user's last edits and whether it was added or dismissed
+- Per message: the reply panel as the user last left it (draft, tone, length, request)
 
-MailFlow does not copy message subjects, bodies, attachments, passwords, or
+MailFlow does not copy full message bodies, attachments, passwords, or
 Gmail labels into PostgreSQL. Priority categories are not written back to Gmail.
 
 Set `DATABASE_URL` to a PostgreSQL connection string that requires TLS and set a

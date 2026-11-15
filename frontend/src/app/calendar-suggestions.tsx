@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MailAnalysis } from "@/lib/mail-analysis";
 import type { Priority } from "@/lib/mail-priority";
 import { candidateKeys, type CalendarSuggestion } from "@/lib/calendar-suggestion";
@@ -27,32 +27,53 @@ function whenLabel(date: string, time: string | null) {
   return day.toLocaleString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", ...(time ? { hour: "numeric", minute: "2-digit" } : {}) });
 }
 
-function Candidate({ candidate, candidateKey, messageId, storageKey }: { candidate: CalendarSuggestion; candidateKey: string; messageId: string; storageKey: string }) {
+type EventStatus = "pending" | "saved" | "dismissed";
+type EventDetails = { title: string; allDay: boolean; date: string; start: string; end: string; zone: string; location: string; description: string };
+export type EventState = { status: EventStatus; details: Partial<EventDetails> };
+const text = (value: unknown, fallback: string) => typeof value === "string" ? value : fallback;
+
+function Candidate({ candidate, candidateKey, messageId, initial }: { candidate: CalendarSuggestion; candidateKey: string; messageId: string; initial?: EventState }) {
+  const kept = initial?.details ?? {};
   const initialStart = candidate.startTime ? `${candidate.date}T${candidate.startTime}` : "";
-  const [hidden, setHidden] = useState(false);
+  const [status, setStatus] = useState<EventStatus>(initial?.status ?? "pending");
   const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(candidate.title);
-  const [allDay, setAllDay] = useState(!candidate.startTime);
-  const [date, setDate] = useState(candidate.date);
-  const [start, setStart] = useState(initialStart);
+  // Every field starts from what the user last left (stored on the server), else from the email.
+  const [title, setTitle] = useState(text(kept.title, candidate.title));
+  const [allDay, setAllDay] = useState(typeof kept.allDay === "boolean" ? kept.allDay : !candidate.startTime);
+  const [date, setDate] = useState(text(kept.date, candidate.date));
+  const [start, setStart] = useState(text(kept.start, initialStart));
   // The email rarely states an end time or zone. Prefill editable defaults (one hour,
   // this device's zone) instead of leaving required fields blank; nothing is saved
-  // until the user confirms the form.
-  const [end, setEnd] = useState(candidate.endTime ? `${candidate.date}T${candidate.endTime}` : initialStart ? addHour(initialStart) : "");
-  const [zone, setZone] = useState(() => candidate.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const [location, setLocation] = useState(candidate.location);
-  const [description, setDescription] = useState(() => [candidate.notes?.length ? candidate.notes.join("\n") : "", `From the email:\n${candidate.evidence}`].filter(Boolean).join("\n\n").slice(0, 8000));
+  // to the calendar until the user confirms the form.
+  const [end, setEnd] = useState(text(kept.end, candidate.endTime ? `${candidate.date}T${candidate.endTime}` : initialStart ? addHour(initialStart) : ""));
+  const [zone, setZone] = useState(() => text(kept.zone, candidate.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone));
+  const [location, setLocation] = useState(text(kept.location, candidate.location));
+  const [description, setDescription] = useState(() => text(kept.description, [candidate.notes?.length ? candidate.notes.join("\n") : "", `From the email:\n${candidate.evidence}`].filter(Boolean).join("\n\n").slice(0, 8000)));
   const [checked, setChecked] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+
+  // Persist the user's last state of this event (edits, added, dismissed) on the server.
+  const stateUrl = `/api/gmail/messages/${encodeURIComponent(messageId)}/calendar-suggestions/state`;
+  const pending = useRef<{ status: EventStatus; details: EventDetails } | undefined>(undefined);
+  const snapshot = JSON.stringify({ status, details: { title, allDay, date, start, end, zone, location, description } satisfies EventDetails });
+  const stored = useRef(snapshot); // What the server already has (or the untouched defaults).
+  const flush = useCallback(() => {
+    const next = pending.current;
+    if (!next) return;
+    pending.current = undefined;
+    void fetch(stateUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: candidateKey, ...next }), keepalive: true }).catch(() => { /* Best effort; the next change writes again. */ });
+  }, [stateUrl, candidateKey]);
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      try { setHidden(localStorage.getItem(`${storageKey}:${candidateKey}`) === "dismissed"); setSaved(localStorage.getItem(`${storageKey}:${candidateKey}`) === "saved"); } catch { /* Storage is optional. */ }
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [storageKey, candidateKey]);
-  const remember = (value: string) => { try { localStorage.setItem(`${storageKey}:${candidateKey}`, value); } catch { /* Storage is optional. */ } };
+    if (snapshot === stored.current) return; // Nothing changed.
+    stored.current = snapshot;
+    pending.current = JSON.parse(snapshot) as { status: EventStatus; details: EventDetails };
+    if (status !== "pending") { flush(); return; } // Added or dismissed: write at once.
+    const timer = window.setTimeout(flush, 800);
+    return () => window.clearTimeout(timer);
+  }, [snapshot, status, flush]);
+  useEffect(() => flush, [flush]); // Leaving the message still writes the last edit.
+
   const changeStart = (value: string) => { setStart(value); if (value && (!end || end <= value)) setEnd(addHour(value)); };
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!checked || saving) return;
@@ -70,25 +91,27 @@ function Candidate({ candidate, candidateKey, messageId, storageKey }: { candida
       const response = await fetch("/api/calendar/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, start: eventStart, end: eventEnd, allDay, location, description, sourceMessageId: messageId, sourceCandidateKey: candidateKey, approved: true }) });
       const data = await response.json();
       if (!response.ok) throw new Error(errorMessages[data.error] ?? "Could not save the event. Check the details and try again.");
-      setSaved(true); setEditing(false); remember("saved");
+      setStatus("saved"); setEditing(false);
     } catch (cause) { setError(cause instanceof RangeError ? "Enter a valid time zone, e.g. Asia/Seoul." : cause instanceof Error ? cause.message : "Could not save the event."); }
     finally { setSaving(false); }
   }
-  if (hidden) return null;
-  if (saved) return <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-800">Added to calendar: {title}</p>;
+  if (status === "dismissed") return null;
+  if (status === "saved") return <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-800">Added to calendar: {title}</p>;
   const field = "mt-1 w-full rounded-lg border border-[#d8d5df] p-2 text-sm";
   const checks = candidate.warnings?.length ?? 0;
   const assumed = !candidate.endTime || !candidate.timeZone;
+  const shownDate = allDay ? date : start.slice(0, 10) || date;
+  const shownTime = allDay || start.length < 16 ? null : start.slice(11, 16);
   return <article className="rounded-xl border border-[#ded8f7] p-4 text-sm">
-    <p className="font-semibold">{candidate.title}</p>
-    <p className="mt-1 text-[#666]">{whenLabel(candidate.date, candidate.startTime)}{candidate.timeZone ? ` · ${candidate.timeZone}` : ""}{candidate.location ? ` · ${candidate.location}` : ""}</p>
+    <p className="font-semibold">{title}</p>
+    <p className="mt-1 text-[#666]">{whenLabel(shownDate, shownTime)}{candidate.timeZone ? ` · ${candidate.timeZone}` : ""}{location ? ` · ${location}` : ""}</p>
     <details className="mt-2 text-xs text-[#666]">
       <summary className="cursor-pointer text-[#5944d8]">Details{checks ? ` · ${checks} to check` : ""}</summary>
       {[candidate.evidence, ...(candidate.supportingEvidence ?? []).filter((quote) => !candidate.evidence.includes(quote))].map((quote, index) => <blockquote key={index} className="mt-2 whitespace-pre-wrap border-l-2 border-[#b9acf4] pl-3">{quote}</blockquote>)}
       {Boolean(candidate.notes?.length) && <ul className="mt-2 list-disc space-y-1 pl-4">{candidate.notes!.map((note, index) => <li key={index}>{note}</li>)}</ul>}
       {checks > 0 && <ul className="mt-2 list-disc space-y-1 rounded-lg bg-amber-50 p-3 pl-6 text-amber-900">{candidate.warnings!.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
     </details>
-    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white">Edit &amp; add</button><button onClick={() => { remember("dismissed"); setHidden(true); }} className="px-2 py-2 text-[#666]">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-[#ece9f7] pt-3">
+    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white">Edit &amp; add</button><button onClick={() => setStatus("dismissed")} className="px-2 py-2 text-[#666]">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-[#ece9f7] pt-3">
       <label className="block">Title<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={field} /></label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={allDay} onChange={(e) => { setAllDay(e.target.checked); setChecked(false); }} />All day</label>
       {allDay ? <label className="block">Date<input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={field} /></label> : <>
@@ -106,8 +129,9 @@ function Candidate({ candidate, candidateKey, messageId, storageKey }: { candida
   </article>;
 }
 
-export function CalendarSuggestions({ messageId, account, onAnalyzedPriority }: { messageId: string; account: string; onAnalyzedPriority?: (priority: Priority) => void }) {
+export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { messageId: string; onAnalyzedPriority?: (priority: Priority) => void }) {
   const [candidates, setCandidates] = useState<CalendarSuggestion[]>([]);
+  const [eventStates, setEventStates] = useState<Record<string, EventState>>({});
   const [analysis, setAnalysis] = useState<MailAnalysis | null>(null);
   const [status, setStatus] = useState("Reading this email for important information…");
   const [retry, setRetry] = useState(0);
@@ -122,6 +146,7 @@ export function CalendarSuggestions({ messageId, account, onAnalyzedPriority }: 
         if (!response.ok) throw new Error(errorMessages[data.error] ?? "Could not check this email for events.");
         if (controller.signal.aborted) return;
         setAnalysis(data.analysis ?? null);
+        setEventStates(data.eventStates ?? {});
         setCandidates(data.candidates ?? []);
         if (data.prioritySaved && ["urgent", "fyi", "low"].includes(data.priority)) onAnalyzedPriority?.(data.priority);
         setStatus(data.note ?? (data.candidates?.length ? "" : "No event found in this email."));
@@ -141,6 +166,6 @@ export function CalendarSuggestions({ messageId, account, onAnalyzedPriority }: 
     </>}
     <div className="border-t border-[#e3e3e3] pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[#5944d8]">Suggested events</h3>{status && <p role="status" className="text-xs text-[#666]">{status}</p>}</div>
     {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-[#5944d8] underline">Retry analysis</button>}
-    {candidates.map((candidate, index) => <Candidate key={keys[index]} candidate={candidate} candidateKey={keys[index]} messageId={messageId} storageKey={`mailflow-calendar:${account}:${messageId}`} />)}
+    {candidates.map((candidate, index) => <Candidate key={keys[index]} candidate={candidate} candidateKey={keys[index]} messageId={messageId} initial={eventStates[keys[index]]} />)}
   </section>;
 }

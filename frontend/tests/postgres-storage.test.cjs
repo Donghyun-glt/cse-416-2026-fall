@@ -45,3 +45,13 @@ test("the reply panel state is stored once per user and message and removed with
   assert.match(storage, /INSERT INTO reply_panel_states[\s\S]+ON CONFLICT \(user_id, gmail_message_id\) DO UPDATE/);
   assert.match(storage, /DELETE FROM reply_panel_states WHERE user_id = \$1 AND gmail_message_id = \$2/);
 });
+
+test("message insights are stored once and event states once per suggested event", () => {
+  const migration = source("db/migrations/004_message_insights.sql");
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS message_insights/i);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS calendar_event_states/i);
+  assert.match(migration, /PRIMARY KEY \(user_id, gmail_message_id, candidate_key\)/i);
+  assert.match(migration, /status IN \('pending', 'saved', 'dismissed'\)/i);
+  const storage = source("src/lib/mailflow-db.ts");
+  assert.match(storage, /INSERT INTO message_insights[\s\S]+ON CONFLICT \(user_id, gmail_message_id\) DO NOTHING/);
+});

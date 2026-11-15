@@ -193,3 +193,49 @@ export async function saveReplyPanelState(input: ReplyPanelState & { userId: num
 export async function deleteReplyPanelState(userId: number, gmailMessageId: string) {
   await query("DELETE FROM reply_panel_states WHERE user_id = $1 AND gmail_message_id = $2", [userId, gmailMessageId]);
 }
+
+/** The stored AI reading of a message, or null if it has not been analysed yet. */
+export async function getMessageInsight(userId: number, gmailMessageId: string): Promise<unknown | null> {
+  const result = await query<{ analysis: unknown }>(`
+    SELECT analysis FROM message_insights WHERE user_id = $1 AND gmail_message_id = $2
+  `, [userId, gmailMessageId]);
+  return result.rows[0]?.analysis ?? null;
+}
+
+/**
+ * Stores a message's analysis the first time only. Returns false when one was
+ * already stored, so callers keep the original instead of replacing it.
+ */
+export async function saveMessageInsight(input: { userId: number; gmailMessageId: string; version: string; analysis: unknown }) {
+  const result = await query(`
+    INSERT INTO message_insights (user_id, gmail_message_id, version, analysis)
+    VALUES ($1, $2, $3, $4::jsonb)
+    ON CONFLICT (user_id, gmail_message_id) DO NOTHING
+    RETURNING user_id
+  `, [input.userId, input.gmailMessageId, input.version, JSON.stringify(input.analysis)]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+export type CalendarEventStatus = "pending" | "saved" | "dismissed";
+export type CalendarEventState = { status: CalendarEventStatus; details: Record<string, unknown> };
+
+/** Per suggested event of a message: what the user last did with it, keyed by candidate key. */
+export async function getCalendarEventStates(userId: number, gmailMessageId: string): Promise<Record<string, CalendarEventState>> {
+  const result = await query<{ candidate_key: string; status: CalendarEventStatus; details: Record<string, unknown> }>(`
+    SELECT candidate_key, status, details
+    FROM calendar_event_states
+    WHERE user_id = $1 AND gmail_message_id = $2
+  `, [userId, gmailMessageId]);
+  return Object.fromEntries(result.rows.map((row) => [row.candidate_key, { status: row.status, details: row.details ?? {} }]));
+}
+
+export async function saveCalendarEventState(input: CalendarEventState & { userId: number; gmailMessageId: string; candidateKey: string }) {
+  await query(`
+    INSERT INTO calendar_event_states (user_id, gmail_message_id, candidate_key, status, details, updated_at)
+    VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+    ON CONFLICT (user_id, gmail_message_id, candidate_key) DO UPDATE SET
+      status = EXCLUDED.status,
+      details = EXCLUDED.details,
+      updated_at = NOW()
+  `, [input.userId, input.gmailMessageId, input.candidateKey, input.status, JSON.stringify(input.details)]);
+}
