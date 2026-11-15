@@ -79,3 +79,11 @@ test('relative dates use message date in the reference zone, not analysis date',
  assert.equal(resolveEmailDate('tomorrow', '2026-11-14T23:30:00Z', 'Asia/Seoul').date, '2026-11-16');
  assert.equal(resolveEmailDate('January 3', '2026-12-30T09:00:00Z', 'UTC').date, '2027-01-03');
 });
+
+test('keeps existing keys and separates suggestions that share a date, time and kind', async () => {
+  const { candidateKeys } = await rules;
+  const one = { date: '2026-11-20', startTime: '14:00', kind: 'appointment', title: 'Appointment' };
+  assert.deepEqual(candidateKeys([one]), ['2026-11-20:14:00:appointment']);
+  const keys = candidateKeys([{ date: '2026-11-20', startTime: null, kind: 'deadline', title: 'Essay  due' }, { date: '2026-11-20', startTime: null, kind: 'deadline', title: 'Form due' }, one]);
+  assert.deepEqual(keys, ['2026-11-20::deadline:essay due', '2026-11-20::deadline:form due', '2026-11-20:14:00:appointment']);
+});

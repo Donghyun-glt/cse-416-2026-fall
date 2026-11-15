@@ -5,6 +5,18 @@ export type CalendarSuggestion = {
   supportingEvidence?: string[]; warnings?: string[]; notes?: string[];
 };
 
+/**
+ * Stable per-message keys used for the saved/dismissed state and the Google event ID.
+ * The base key stays `date:startTime:kind` so existing saved events keep their IDs;
+ * the title is appended only when two suggestions in one email would otherwise collide
+ * (for example two untimed deadlines on the same day).
+ */
+export function candidateKeys(candidates: Pick<CalendarSuggestion, "date" | "startTime" | "kind" | "title">[]): string[] {
+  const base = candidates.map((candidate) => `${candidate.date}:${candidate.startTime ?? ""}:${candidate.kind}`);
+  return base.map((key, index) => base.indexOf(key) === base.lastIndexOf(key) ? key
+    : `${key}:${candidates[index].title.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()}`);
+}
+
 export function grounded(quote: unknown, source: string): quote is string {
   const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/g, " ").trim();
   return typeof quote === "string" && normalize(quote).length >= 2 && normalize(source).includes(normalize(quote));

@@ -7,9 +7,10 @@ const vm = require("node:vm");
 const ts = require("typescript");
 const { NextRequest } = require("next/server");
 
-function route(scope, googleError) {
+function route(scope, googleError, existingEvent) {
   let calls = 0;
   const inserts = [];
+  const updates = [];
   const source = readFileSync(resolve(__dirname, "../src/app/api/calendar/events/route.ts"), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const exports = {};
@@ -19,11 +20,11 @@ function route(scope, googleError) {
       if (name === "@/lib/calendar-suggestion") return require("../src/lib/calendar-suggestion.ts");
       if (name === "@/lib/gmail-session") return { getGmailSession: async () => ({ access_token: "fake", scope }) };
       if (name === "@/lib/google") return { CALENDAR_EVENTS_SCOPE: "https://www.googleapis.com/auth/calendar.events", createGoogleOAuthClient: () => ({ setCredentials() {} }) };
-      if (name === "googleapis") return { google: { calendar: () => ({ events: { insert: async (input) => { inserts.push(input); if (googleError) throw googleError; return { data: { id: input.requestBody.id ?? "new-event" } }; }, list: async () => { calls++; if (googleError) throw googleError; return { data: { items: [] } }; } } }) } };
+      if (name === "googleapis") return { google: { calendar: () => ({ events: { get: async () => { if (!existingEvent) throw { response: { status: 404 } }; return { data: existingEvent }; }, update: async (input) => { updates.push(input); return { data: { id: input.eventId, htmlLink: "https://calendar.test/restored" } }; }, insert: async (input) => { inserts.push(input); if (googleError) throw googleError; return { data: { id: input.requestBody.id ?? "new-event" } }; }, list: async () => { calls++; if (googleError) throw googleError; return { data: { items: [] } }; } } }) } };
       return require(name);
     },
   });
-  return { GET: exports.GET, POST: exports.POST, calls: () => calls, inserts };
+  return { GET: exports.GET, POST: exports.POST, calls: () => calls, inserts, updates };
 }
 
 function request() {
@@ -78,6 +79,23 @@ test("Google duplicate conflicts return success so timeout retries do not create
   const response = await handler.POST(approval(approved));
   assert.equal(response.status, 200);
   assert.equal((await response.json()).alreadyAdded, true);
+});
+test("a 409 for an event that still exists reports it as already added without rewriting it", async () => {
+  const handler = route("https://www.googleapis.com/auth/calendar.events", { response: { status: 409 } }, { status: "confirmed", htmlLink: "https://calendar.test/existing" });
+  const response = await handler.POST(approval(approved));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).alreadyAdded, true);
+  assert.equal(handler.updates.length, 0);
+});
+test("a 409 for an event the user deleted restores it with the reviewed details", async () => {
+  const handler = route("https://www.googleapis.com/auth/calendar.events", { response: { status: 409 } }, { status: "cancelled" });
+  const response = await handler.POST(approval({ ...approved, title: "Edited title" }));
+  assert.equal(response.status, 201);
+  assert.equal((await response.json()).restored, true);
+  assert.equal(handler.updates.length, 1);
+  assert.equal(handler.updates[0].requestBody.status, "confirmed");
+  assert.equal(handler.updates[0].requestBody.summary, "Edited title");
+  assert.equal(handler.updates[0].eventId, handler.inserts[0].requestBody.id);
 });
 
 test("reviewed requirements and source notes are included in the calendar event", async () => {

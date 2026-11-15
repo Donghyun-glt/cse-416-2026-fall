@@ -124,24 +124,35 @@ export async function POST(request: NextRequest) {
   const eventId = typeof sourceMessageId === "string"
     ? createHash("sha256").update(`mailflow:${sourceMessageId}:${sourceCandidateKey}`).digest("hex")
     : undefined;
+  const requestBody = {
+    id: eventId,
+    summary: title.trim(),
+    description: typeof description === "string" ? description.trim() : undefined,
+    start: allDay === true ? { date: start as string } : { dateTime: new Date(startTime).toISOString() },
+    end: allDay === true ? { date: end as string } : { dateTime: new Date(endTime).toISOString() },
+    location: typeof location === "string" ? location.trim() : undefined,
+    extendedProperties: typeof sourceMessageId === "string" ? { private: { mailflowMessageId: sourceMessageId } } : undefined,
+  };
   try {
-    const response = await calendar.events.insert({
-      calendarId: "primary",
-      requestBody: {
-        id: eventId,
-        summary: title.trim(),
-        description: typeof description === "string" ? description.trim() : undefined,
-        start: allDay === true ? { date: start as string } : { dateTime: new Date(startTime).toISOString() },
-        end: allDay === true ? { date: end as string } : { dateTime: new Date(endTime).toISOString() },
-        location: typeof location === "string" ? location.trim() : undefined,
-        extendedProperties: typeof sourceMessageId === "string" ? { private: { mailflowMessageId: sourceMessageId } } : undefined,
-      },
-    });
+    const response = await calendar.events.insert({ calendarId: "primary", requestBody });
     return NextResponse.json({ id: response.data.id, url: response.data.htmlLink }, { status: 201 });
   } catch (error) {
-    if (eventId && errorStatus(error) === 409) {
+    if (!eventId || errorStatus(error) !== 409) return failure(error);
+    // The ID is taken. Google keeps the ID of a deleted event, so a 409 does not
+    // prove the event is still on the calendar: restore it if the user deleted it.
+    let existing;
+    try {
+      existing = (await calendar.events.get({ calendarId: "primary", eventId })).data;
+    } catch {
+      // Could not look it up; keep retries idempotent instead of failing the save.
       return NextResponse.json({ id: eventId, alreadyAdded: true });
     }
-    return failure(error);
+    if (existing.status !== "cancelled") return NextResponse.json({ id: eventId, url: existing.htmlLink, alreadyAdded: true });
+    try {
+      const restored = await calendar.events.update({ calendarId: "primary", eventId, requestBody: { ...requestBody, status: "confirmed" } });
+      return NextResponse.json({ id: eventId, url: restored.data.htmlLink, restored: true }, { status: 201 });
+    } catch (restoreError) {
+      return failure(restoreError);
+    }
   }
 }
