@@ -283,7 +283,10 @@ function EmailBody({ html, inert, onReady, placeholder }: { html: string; inert?
     if (measured) onReadyRef.current?.();
   }, [measured]);
   return (
-    <div className="relative">
+    // Like Gmail on the web, the email itself is not recoloured in dark mode: it keeps its
+    // own light page. Here that page is a rounded sheet with a margin, so it reads as
+    // paper on the dark surface instead of a white block cut off at the text edge.
+    <div className={`relative ${measured ? "overflow-hidden rounded-xl bg-white p-[var(--mail-paper-pad)]" : ""}`}>
       {!measured && placeholder}
       {/* scrolling="no": the frame is always as tall as its content, so it never needs its own scrollbar. */}
       <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" scrolling="no" aria-busy={!measured}

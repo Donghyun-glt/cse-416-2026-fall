@@ -6,6 +6,11 @@
   --mail-surface: #fff;
   --mail-muted-surface: #f4f3f0;
   --mail-hover: #eeece8;
+  /* Opened mail in lists: a recessed row with quieter text. */
+  --mail-read-surface: #f4f3f0;
+  --mail-read-text: #252521;
+  /* Space around an email's own (always light) page; only needed on a dark surface. */
+  --mail-paper-pad: 0px;
   --mail-line: #e4e2dd;
   --mail-line-strong: #85817a;
   --mail-secondary: #59564f;
@@ -31,6 +36,9 @@
   --mail-surface: #201e29;
   --mail-muted-surface: #292634;
   --mail-hover: #332f40;
+  --mail-read-surface: #16151c;
+  --mail-read-text: #9d97ab;
+  --mail-paper-pad: 20px;
   --mail-line: #3c3849;
   --mail-line-strong: #888198;
   --mail-secondary: #c5bfd2;
@@ -55,6 +63,8 @@
   --color-mail-surface: var(--mail-surface);
   --color-mail-muted-surface: var(--mail-muted-surface);
   --color-mail-hover: var(--mail-hover);
+  --color-mail-read-surface: var(--mail-read-surface);
+  --color-mail-read-text: var(--mail-read-text);
   --color-mail-line: var(--mail-line);
   --color-mail-line-strong: var(--mail-line-strong);
   --color-mail-secondary: var(--mail-secondary);

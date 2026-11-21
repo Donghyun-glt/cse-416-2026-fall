@@ -118,11 +118,11 @@ function BriefingCard({ message, insight, color, onOpen }: { message: Mail; insi
   const calendar = eventStatus(insight);
   const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
   return <button type="button" onClick={() => onOpen(message)}
-    className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-[0_3px_12px_rgba(31,31,27,0.08)] ${message.unread ? "border-mail-accent-line bg-mail-surface" : "border-mail-line bg-mail-muted-surface"}`}>
+    className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-[0_3px_12px_rgba(31,31,27,0.08)] ${message.unread ? "border-mail-accent-line bg-mail-surface" : "border-mail-line bg-mail-read-surface text-mail-read-text"}`}>
     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span>
     <span className="min-w-0 flex-1">
       <span className="flex items-center gap-2">
-        <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold text-mail-secondary"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject || "(no subject)"}</span></span>
+        <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject || "(no subject)"}</span></span>
         {message.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-[#5944d8]" aria-label="Unread" />}
         <time className="shrink-0 text-xs text-mail-muted">{timeLabel(message.date)}</time>
       </span>
