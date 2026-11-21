@@ -16,6 +16,8 @@ export type Mail = {
   unsubscribeUrl: string;
   date: string;
   snippet: string;
+  /** Cached MailFlow analysis shown in Summary when available. */
+  summary?: string;
   html: string;
   unread: boolean;
   starred: boolean;
@@ -79,9 +81,9 @@ const aiErrorMessage: Record<string, string> = {
 const GMAIL_FONT = '"Google Sans", "Google Sans Text", Roboto, "Segoe UI", Arial, "Malgun Gothic", sans-serif';
 
 const priorityChip: Record<Priority, { label: string; className: string }> = {
-  urgent: { label: "Urgent", className: "bg-[#fad2cf] text-[#a50e0e]" },
-  fyi: { label: "FYI", className: "bg-[#feefc3] text-[#594300]" },
-  low: { label: "Low Priority", className: "bg-[#ceead6] text-[#0d652d]" },
+  urgent: { label: "Urgent", className: "bg-mail-danger-tint text-mail-danger" },
+  fyi: { label: "FYI", className: "bg-mail-warning-tint text-mail-warning" },
+  low: { label: "Low Priority", className: "bg-mail-success-tint text-mail-success" },
 };
 
 // ---------------------------------------------------------------------------
@@ -214,14 +216,14 @@ export function GIcon({ name, className = "h-5 w-5" }: { name: IconName; classNa
 export function ToolbarButton({ icon, label, onClick, disabled, active, className = "" }: { icon: IconName; label: string; onClick?: () => void; disabled?: boolean; active?: boolean; className?: string }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label}
-      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#1f1f1f14] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${active ? "text-[#e2a600]" : "text-[#444746]"} ${className}`}>
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-mail-muted-surface disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${active ? "text-[#e2a600]" : "text-mail-secondary"} ${className}`}>
       <GIcon name={icon} />
     </button>
   );
 }
 
 function Divider() {
-  return <span className="mx-2 h-5 w-px shrink-0 bg-[#c4c7c5]" aria-hidden="true" />;
+  return <span className="mx-2 h-5 w-px shrink-0 bg-mail-line" aria-hidden="true" />;
 }
 
 function FileBadge({ kind, className = "h-5 w-5" }: { kind: FileKind; className?: string }) {
@@ -285,7 +287,7 @@ function EmailBody({ html, inert, onReady, placeholder }: { html: string; inert?
       {!measured && placeholder}
       {/* scrolling="no": the frame is always as tall as its content, so it never needs its own scrollbar. */}
       <iframe ref={frameRef} srcDoc={html} onLoad={handleLoad} title="Message body" scrolling="no" aria-busy={!measured}
-        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-transparent"
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0 bg-white"
         style={measured
           ? { height, overflow: "hidden", pointerEvents: inert ? "none" : undefined }
           : { height, overflow: "hidden", position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" }} />
@@ -302,9 +304,9 @@ function AttachmentCard({ attachment, onOpen }: { attachment: GmailAttachment; o
   const [thumbFailed, setThumbFailed] = useState(false);
   const showImageThumb = kind === "image" && canPreviewInline(attachment) && !thumbFailed;
   return (
-    <div className="group relative h-[120px] w-[180px] shrink-0 overflow-hidden rounded-lg border border-[#e0e0e0] bg-[#f8fafd]">
+    <div className="group relative h-[120px] w-[180px] shrink-0 overflow-hidden rounded-lg border border-mail-line bg-mail-muted-surface">
       <button type="button" onClick={onOpen} className="absolute inset-0 text-left" aria-label={`Preview ${attachment.filename}`}>
-        <span className="absolute inset-x-0 top-0 bottom-10 flex items-center justify-center overflow-hidden bg-[#f1f3f4]">
+        <span className="absolute inset-x-0 top-0 bottom-10 flex items-center justify-center overflow-hidden bg-mail-muted-surface">
           {showImageThumb
             // eslint-disable-next-line @next/next/no-img-element -- authenticated API route, not a static asset
             ? <img src={attachment.previewUrl} alt="" loading="lazy" onError={() => setThumbFailed(true)} className="h-full w-full object-cover" />
@@ -312,9 +314,9 @@ function AttachmentCard({ attachment, onOpen }: { attachment: GmailAttachment; o
               ? <span className="flex h-[62px] w-[48px] flex-col items-center justify-center rounded-sm bg-white shadow-[0_1px_2px_rgba(60,64,67,.3)]"><FileBadge kind="pdf" className="h-6 w-6" /></span>
               : <FileBadge kind={kind} className="h-10 w-10" />}
         </span>
-        <span className="absolute inset-x-0 bottom-0 flex h-10 items-center gap-2 border-t border-[#e0e0e0] bg-white px-2.5 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+        <span className="absolute inset-x-0 bottom-0 flex h-10 items-center gap-2 border-t border-mail-line bg-mail-surface px-2.5 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
           <FileBadge kind={kind} className="h-4 w-4" />
-          <span className="min-w-0 truncate text-xs font-medium text-[#1f1f1f]">{attachment.filename}</span>
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">{attachment.filename}</span>
         </span>
       </button>
       {/* Hover layer, like Gmail: name on top, actions at the bottom */}
@@ -413,7 +415,7 @@ function useDismiss(open: boolean, close: () => void) {
 }
 
 function MenuItem({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
-  return <button type="button" role="menuitem" onClick={onClick} className="flex h-9 w-full items-center gap-4 px-4 text-left text-sm text-[#1f1f1f] hover:bg-[#f2f2f2]"><GIcon name={icon} className="h-5 w-5 text-[#444746]" />{label}</button>;
+  return <button type="button" role="menuitem" onClick={onClick} className="flex h-9 w-full items-center gap-4 px-4 text-left text-sm text-foreground hover:bg-mail-muted-surface"><GIcon name={icon} className="h-5 w-5 text-mail-secondary" />{label}</button>;
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +430,7 @@ export type MailDetailProps = {
   position: number;
   total: number;
   onBack: () => void;
+  backLabel?: string;
   onNewer?: () => void;
   onOlder?: () => void;
   onDelete?: () => void;
@@ -444,7 +447,7 @@ export type MailDetailProps = {
   onStar: () => void;
 };
 
-export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, initialDraft, onDraftChange, onMarkUnread, onPriorityChange, onAnalyzedPriority, onStar }: MailDetailProps) {
+export function MailDetail({ message, myEmail, deleting, error, position, total, onBack, backLabel = "Back to Inbox", onNewer, onOlder, onDelete, onArchive, onSpam, onNotSpam, initialDraft, onDraftChange, onMarkUnread, onPriorityChange, onAnalyzedPriority, onStar }: MailDetailProps) {
   const sender = formatSender(message.from);
   const address = senderAddress(message.from);
   const visibleAttachments = useMemo(() => message.attachments.filter((attachment) => !attachment.inline), [message.attachments]);
@@ -955,37 +958,37 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   };
 
   const attachmentHeading = visibleAttachments.length === 1 ? "One attachment" : `${visibleAttachments.length} attachments`;
-  const pillClass = "flex h-9 items-center gap-2 rounded-full border border-[#747775] bg-white pl-3 pr-4 text-sm font-medium text-[#444746] transition-colors hover:bg-[#f2f2f2] hover:shadow-[0_1px_2px_rgba(60,64,67,.3)]";
+  const pillClass = "flex h-9 items-center gap-2 rounded-full border border-mail-line-strong bg-mail-surface pl-3 pr-4 text-sm font-medium text-mail-secondary transition-colors hover:bg-mail-muted-surface hover:shadow-[0_1px_2px_rgba(60,64,67,.3)]";
 
   return (
-    <section className={`flex min-h-screen flex-col bg-white text-[#1f1f1f] ${settling ? "select-none" : ""}`} style={{ fontFamily: GMAIL_FONT }}
+    <section className={`flex min-h-screen flex-col bg-mail-surface text-foreground ${settling ? "select-none" : ""}`} style={{ fontFamily: GMAIL_FONT }}
       onMouseDownCapture={(event) => { if (settling && event.detail > 1) event.preventDefault(); }}>
       {/* ---------- Top action toolbar ---------- */}
-      <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center bg-white pl-2 pr-3 sm:pl-4">
-        <ToolbarButton icon="back" label="Back to Inbox" onClick={onBack} />
+      <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center bg-mail-surface pl-2 pr-3 sm:pl-4">
+        <ToolbarButton icon="back" label={backLabel} onClick={onBack} />
         <span className="ml-2 flex items-center">
           {onArchive && <ToolbarButton icon="archive" label="Archive" onClick={onArchive} className="hidden sm:flex" />}
           {onSpam && <ToolbarButton icon="spam" label="Report spam" onClick={onSpam} className="hidden sm:flex" />}
-          {onNotSpam && <button type="button" onClick={onNotSpam} className="mx-1 h-8 rounded-full border border-[#747775] px-3 text-xs font-medium text-[#444746] hover:bg-[#f2f2f2]">Not spam</button>}
+          {onNotSpam && <button type="button" onClick={onNotSpam} className="mx-1 h-8 rounded-full border border-mail-line-strong px-3 text-xs font-medium text-mail-secondary hover:bg-mail-muted-surface">Not spam</button>}
           {onDelete && <ToolbarButton icon="trash" label="Delete" onClick={onDelete} disabled={deleting} />}
           {onMarkUnread && <><Divider /><ToolbarButton icon="unread" label="Mark as unread" onClick={onMarkUnread} /></>}
         </span>
-        {deleting && <span className="ml-2 text-xs text-[#5e5e5e]">Deleting…</span>}
+        {deleting && <span className="ml-2 text-xs text-mail-secondary">Deleting…</span>}
         <span className="ml-auto flex items-center gap-1">
-          {total > 0 && position > 0 && <span className="mr-2 hidden whitespace-nowrap text-xs text-[#444746] sm:inline">{position.toLocaleString("en-US")} of {total.toLocaleString("en-US")}</span>}
+          {total > 0 && position > 0 && <span className="mr-2 hidden whitespace-nowrap text-xs text-mail-secondary sm:inline">{position.toLocaleString("en-US")} of {total.toLocaleString("en-US")}</span>}
           <ToolbarButton icon="chevronLeft" label="Newer" onClick={onNewer} disabled={!onNewer} />
           <ToolbarButton icon="chevronRight" label="Older" onClick={onOlder} disabled={!onOlder} />
         </span>
       </div>
 
-      <div className={`flex-1 lg:items-start lg:bg-[#f6f8fc] lg:px-6 lg:py-5 ${showAiPanel ? "lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]" : ""}`}>
-      <div className="min-w-0 lg:rounded-2xl lg:border lg:border-[#e3e3e3] lg:bg-white lg:pb-6">
-        {error && <p className="mx-4 mb-2 rounded-lg bg-[#fce8e6] px-4 py-3 text-sm text-[#a50e0e] sm:ml-[72px]">{error}</p>}
+      <div className={`flex-1 lg:items-start lg:bg-mail-muted-surface lg:px-6 lg:py-5 ${showAiPanel ? "lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]" : ""}`}>
+      <div className="min-w-0 lg:rounded-2xl lg:border lg:border-mail-line lg:bg-mail-surface lg:pb-6">
+        {error && <p className="mx-4 mb-2 rounded-lg bg-mail-danger-tint px-4 py-3 text-sm text-mail-danger sm:ml-[72px]">{error}</p>}
 
         {/* ---------- Subject + labels ---------- */}
         <div className="flex items-start gap-2 pl-4 pr-4 pt-5 sm:pl-[72px]">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[22px] font-normal leading-7 text-[#1f1f1f]">
+            <h1 className="text-[22px] font-normal leading-7 text-foreground">
               {message.subject}
               {!message.draft && (
                 <label className="relative ml-2 inline-flex translate-y-[-2px] align-middle">
@@ -1010,41 +1013,41 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg font-medium text-white" style={{ backgroundColor: avatarColor(address || sender) }}>{initials(sender).slice(0, 1)}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-1">
-              <span className="text-sm font-bold text-[#1f1f1f]">{sender}</span>
-              {address && address !== sender && <span className="truncate text-xs text-[#5e5e5e]">&lt;{address}&gt;</span>}
-              {message.unsubscribeUrl && <a href={message.unsubscribeUrl} target="_blank" rel="noreferrer" className="ml-3 text-xs text-[#0b57d0] underline-offset-2 hover:underline">Unsubscribe</a>}
+              <span className="text-sm font-bold text-foreground">{sender}</span>
+              {address && address !== sender && <span className="truncate text-xs text-mail-secondary">&lt;{address}&gt;</span>}
+              {message.unsubscribeUrl && <a href={message.unsubscribeUrl} target="_blank" rel="noreferrer" className="ml-3 text-xs text-mail-link underline-offset-2 hover:underline">Unsubscribe</a>}
             </div>
             <div ref={detailsRef} className="relative">
-              <button type="button" onClick={() => setDetailsOpen((open) => !open)} aria-expanded={detailsOpen} aria-label="Show details" className="flex items-center text-xs text-[#5e5e5e] hover:text-[#1f1f1f]">
+              <button type="button" onClick={() => setDetailsOpen((open) => !open)} aria-expanded={detailsOpen} aria-label="Show details" className="flex items-center text-xs text-mail-secondary hover:text-foreground">
                 <span className="max-w-[60vw] truncate">to {recipients.length === 0 ? "me" : recipients.map((recipient) => (me && recipient.toLowerCase().includes(me) ? "me" : formatSender(recipient))).join(", ")}</span>
                 <GIcon name="dropDown" className="h-5 w-5" />
               </button>
               {detailsOpen && (
-                <div className="absolute left-0 top-6 z-30 w-[min(480px,85vw)] rounded-lg bg-white p-4 text-xs text-[#1f1f1f] shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
+                <div className="absolute left-0 top-6 z-30 w-[min(480px,85vw)] rounded-lg bg-mail-surface p-4 text-xs text-foreground shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
                   <dl className="grid grid-cols-[72px_1fr] gap-x-2 gap-y-1.5">
-                    <dt className="text-right text-[#5e5e5e]">from:</dt><dd className="break-all"><b>{sender}</b> {address && `<${address}>`}</dd>
-                    {message.to && <><dt className="text-right text-[#5e5e5e]">to:</dt><dd className="break-all">{message.to}</dd></>}
-                    {message.cc && <><dt className="text-right text-[#5e5e5e]">cc:</dt><dd className="break-all">{message.cc}</dd></>}
-                    <dt className="text-right text-[#5e5e5e]">date:</dt><dd>{fullDate(message.date)}</dd>
-                    <dt className="text-right text-[#5e5e5e]">subject:</dt><dd className="break-words">{message.subject}</dd>
+                    <dt className="text-right text-mail-secondary">from:</dt><dd className="break-all"><b>{sender}</b> {address && `<${address}>`}</dd>
+                    {message.to && <><dt className="text-right text-mail-secondary">to:</dt><dd className="break-all">{message.to}</dd></>}
+                    {message.cc && <><dt className="text-right text-mail-secondary">cc:</dt><dd className="break-all">{message.cc}</dd></>}
+                    <dt className="text-right text-mail-secondary">date:</dt><dd>{fullDate(message.date)}</dd>
+                    <dt className="text-right text-mail-secondary">subject:</dt><dd className="break-words">{message.subject}</dd>
                   </dl>
                 </div>
               )}
             </div>
           </div>
           <div className="flex shrink-0 items-center">
-            {visibleAttachments.length > 0 && <GIcon name="attach" className="mr-1 hidden h-4 w-4 -rotate-45 text-[#5e5e5e] sm:block" />}
-            <time className="mr-1 hidden whitespace-nowrap text-xs text-[#5e5e5e] sm:inline" dateTime={message.date}>{gmailTime(message.date)}</time>
+            {visibleAttachments.length > 0 && <GIcon name="attach" className="mr-1 hidden h-4 w-4 -rotate-45 text-mail-secondary sm:block" />}
+            <time className="mr-1 hidden whitespace-nowrap text-xs text-mail-secondary sm:inline" dateTime={message.date}>{gmailTime(message.date)}</time>
             <ToolbarButton icon={message.starred ? "star" : "starBorder"} label={message.starred ? "Starred" : "Not starred"} onClick={onStar} active={message.starred} />
             {!message.draft && <ToolbarButton icon="reply" label="Reply" onClick={() => openComposer("reply")} className="hidden sm:flex" />}
             <div ref={moreRef} className="relative">
               <ToolbarButton icon="more" label="More" onClick={() => setMoreOpen((open) => !open)} />
               {moreOpen && (
-                <div role="menu" className="absolute right-0 top-10 z-30 w-56 rounded bg-white py-2 shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
+                <div role="menu" className="absolute right-0 top-10 z-30 w-56 rounded bg-mail-surface py-2 shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
                   {!message.draft && <MenuItem icon="reply" label="Reply" onClick={() => openComposer("reply")} />}
                   {canReplyAll && <MenuItem icon="replyAll" label="Reply all" onClick={() => openComposer("replyAll")} />}
                   {!message.draft && <MenuItem icon="forward" label="Forward" onClick={() => openComposer("forward")} />}
-                  <div className="my-2 h-px bg-[#e0e0e0]" />
+                  <div className="my-2 h-px bg-mail-line" />
                   {onDelete && <MenuItem icon="trash" label="Delete this message" onClick={() => { setMoreOpen(false); onDelete(); }} />}
                   {onMarkUnread && <MenuItem icon="unread" label="Mark as unread" onClick={() => { setMoreOpen(false); onMarkUnread(); }} />}
                   <MenuItem icon="print" label="Print" onClick={() => writeWindow(true)} />
@@ -1053,23 +1056,23 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
             </div>
           </div>
         </div>
-        <time className="block pl-[68px] pt-1 text-xs text-[#5e5e5e] sm:hidden" dateTime={message.date}>{gmailTime(message.date)}</time>
+        <time className="block pl-[68px] pt-1 text-xs text-mail-secondary sm:hidden" dateTime={message.date}>{gmailTime(message.date)}</time>
 
         {/* ---------- Body ---------- */}
         <div className="pl-4 pr-4 pt-4 sm:pl-[72px] sm:pr-6">
           {(() => {
             // Shown while the message is being fetched and while its body is being laid out.
-            const loadingBody = <p className="py-6 text-sm leading-6 text-[#5e5e5e]" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-[#9a9a9a]">Loading message…</span></p>;
+            const loadingBody = <p className="py-6 text-sm leading-6 text-mail-secondary" aria-busy="true">{message.snippet}<span className="mt-3 block text-xs text-mail-muted">Loading message…</span></p>;
             return message.partial ? loadingBody : <EmailBody html={message.html} inert={settling} onReady={markBodyReady} placeholder={loadingBody} />;
           })()}
         </div>
 
         {/* ---------- Attachments ---------- */}
         {visibleAttachments.length > 0 && (
-          <div className="ml-4 mr-4 mt-6 border-t border-[#e0e0e0] pb-2 pt-4 sm:ml-[72px] sm:mr-6">
-            <div className="mb-4 flex items-center gap-2 text-sm text-[#444746]">
+          <div className="ml-4 mr-4 mt-6 border-t border-mail-line pb-2 pt-4 sm:ml-[72px] sm:mr-6">
+            <div className="mb-4 flex items-center gap-2 text-sm text-mail-secondary">
               <span className="font-medium">{attachmentHeading}</span>
-              {visibleAttachments.length > 1 && <button type="button" onClick={downloadAll} aria-label="Download all attachments" title="Download all" className="ml-auto flex h-9 w-9 items-center justify-center rounded-full text-[#444746] hover:bg-[#1f1f1f14]"><GIcon name="download" /></button>}
+              {visibleAttachments.length > 1 && <button type="button" onClick={downloadAll} aria-label="Download all attachments" title="Download all" className="ml-auto flex h-9 w-9 items-center justify-center rounded-full text-mail-secondary hover:bg-mail-muted-surface"><GIcon name="download" /></button>}
             </div>
             <div className="flex flex-wrap gap-4">
               {visibleAttachments.map((attachment, index) => <AttachmentCard key={attachment.partId} attachment={attachment} onOpen={() => setViewerIndex(index)} />)}
@@ -1084,17 +1087,17 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
           return (
           <div className="flex gap-3 px-4 pb-8 pt-6 sm:gap-4">
             <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#5b4bd6] text-lg font-medium text-white sm:flex">{initials(myEmail || "Me").slice(0, 1)}</span>
-            <div className="min-w-0 flex-1 rounded-2xl border border-[#e3e3e3] bg-white shadow-[0_1px_3px_rgba(60,64,67,.2),0_4px_10px_2px_rgba(60,64,67,.08)] transition focus-within:border-[#b9b1ee]">
+            <div className="min-w-0 flex-1 rounded-2xl border border-mail-line bg-mail-surface shadow-[0_1px_3px_rgba(60,64,67,.2),0_4px_10px_2px_rgba(60,64,67,.08)] transition focus-within:border-mail-accent-line">
               {/* Header: what kind of message this is, and who gets it */}
               <div className="flex min-h-12 items-start gap-1 px-2 pt-2 text-sm">
                 <div ref={modeRef} className="relative shrink-0">
                   <button type="button" onClick={() => setModeOpen((open) => !open)} aria-haspopup="menu" aria-expanded={modeOpen} aria-label={`${modeLabel}. Change type of response`} title="Type of response"
-                    className="flex h-8 items-center rounded-full pl-2 pr-0.5 text-[#444746] hover:bg-[#1f1f1f14]">
+                    className="flex h-8 items-center rounded-full pl-2 pr-0.5 text-mail-secondary hover:bg-mail-muted-surface">
                     <GIcon name={composeMode === "forward" ? "forward" : composeMode === "replyAll" ? "replyAll" : "reply"} className="h-5 w-5" />
                     <GIcon name="dropDown" className="h-5 w-5" />
                   </button>
                   {modeOpen && (
-                    <div role="menu" className="absolute left-0 top-9 z-30 w-44 rounded bg-white py-2 shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
+                    <div role="menu" className="absolute left-0 top-9 z-30 w-44 rounded bg-mail-surface py-2 shadow-[0_4px_8px_3px_rgba(60,64,67,.15),0_1px_3px_rgba(60,64,67,.3)]">
                       <MenuItem icon="reply" label="Reply" onClick={() => switchComposeMode("reply")} />
                       {canReplyAll && <MenuItem icon="replyAll" label="Reply all" onClick={() => switchComposeMode("replyAll")} />}
                       <MenuItem icon="forward" label="Forward" onClick={() => switchComposeMode("forward")} />
@@ -1103,14 +1106,14 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                 </div>
                 {composeMode === "forward" ? (
                   <label className="flex min-w-0 flex-1 items-center gap-2 pt-0.5">
-                    <span className="shrink-0 text-[#5e5e5e]">To</span>
+                    <span className="shrink-0 text-mail-secondary">To</span>
                     <input value={forwardTo} onChange={(event) => setForwardTo(event.target.value)} type="text" inputMode="email" placeholder="name@example.com, another@example.com" aria-label="Recipients" autoFocus
-                      className="min-w-0 flex-1 bg-transparent py-1 outline-none placeholder:text-[#9a9a9a]" />
+                      className="min-w-0 flex-1 bg-transparent py-1 outline-none placeholder:text-mail-muted" />
                   </label>
                 ) : (
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 pt-1.5">
-                    <span className="max-w-full truncate text-[#1f1f1f]">{sender}{address && address !== sender && <span className="text-[#5e5e5e]"> ({address})</span>}</span>
-                    {composeMode === "replyAll" && otherRecipients.map((recipient) => <span key={recipient} className="max-w-full truncate rounded-full bg-[#f0eefb] px-2 py-0.5 text-xs text-[#1f1f1f]">{formatSender(recipient)}</span>)}
+                    <span className="max-w-full truncate text-foreground">{sender}{address && address !== sender && <span className="text-mail-secondary"> ({address})</span>}</span>
+                    {composeMode === "replyAll" && otherRecipients.map((recipient) => <span key={recipient} className="max-w-full truncate rounded-full bg-mail-accent-tint px-2 py-0.5 text-xs text-foreground">{formatSender(recipient)}</span>)}
                   </span>
                 )}
               </div>
@@ -1126,40 +1129,40 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                 onDrop={(event) => { if (event.dataTransfer.files.length > 0) { event.preventDefault(); addFiles(event.dataTransfer.files); } }}
                 onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canSend) { event.preventDefault(); void sendMessage(); } }}
                 style={{ fontFamily: COMPOSER_FONTS[0][1] }}
-                className={`max-h-[50vh] min-h-[130px] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 outline-none empty:before:pointer-events-none empty:before:text-[#9a9a9a] empty:before:content-[attr(data-placeholder)] ${EDITOR_CONTENT_CLASS}`} />
+                className={`max-h-[50vh] min-h-[130px] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 outline-none empty:before:pointer-events-none empty:before:text-mail-muted empty:before:content-[attr(data-placeholder)] ${EDITOR_CONTENT_CLASS}`} />
 
               {/* The original message is added below the text when it is sent */}
               <div className="px-4 pb-2">
                 <button type="button" onClick={() => setQuoteOpen((open) => !open)} aria-expanded={quoteOpen} title={quoteOpen ? "Hide original message" : "Show original message"} aria-label={quoteOpen ? "Hide original message" : "Show original message"}
-                  className="flex h-4 items-center rounded-full bg-[#e9eef6] px-2 text-[#444746] hover:bg-[#d3dbe5]"><span aria-hidden="true" className="-mt-1.5 text-base font-bold leading-none tracking-wider">…</span></button>
+                  className="flex h-4 items-center rounded-full bg-mail-muted-surface px-2 text-mail-secondary hover:bg-mail-hover"><span aria-hidden="true" className="-mt-1.5 text-base font-bold leading-none tracking-wider">…</span></button>
                 {quoteOpen && (
-                  <div className="mt-2 border-l-2 border-[#d3d3d3] pl-3 text-xs leading-5 text-[#5e5e5e]">
+                  <div className="mt-2 border-l-2 border-mail-line pl-3 text-xs leading-5 text-mail-secondary">
                     <p>{composeMode === "forward" ? "---------- Forwarded message ---------" : `On ${fullDate(message.date)}, ${sender} wrote:`}</p>
                     <p className="mt-1 line-clamp-3">{message.snippet}</p>
-                    <p className="mt-1 text-[#9a9a9a]">The full original message is included when you send.</p>
+                    <p className="mt-1 text-mail-muted">The full original message is included when you send.</p>
                   </div>
                 )}
               </div>
 
               {composeMode === "forward" && visibleAttachments.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-4 pb-3">
-                  {visibleAttachments.map((attachment) => <span key={attachment.partId} className="flex max-w-[240px] items-center gap-2 rounded bg-[#f2f2f2] px-2 py-1 text-xs"><FileBadge kind={fileKind(attachment)} className="h-4 w-4" /><span className="truncate font-medium text-[#0b57d0]">{attachment.filename}</span><span className="text-[#5e5e5e]">({formatBytes(attachment.size)})</span></span>)}
+                  {visibleAttachments.map((attachment) => <span key={attachment.partId} className="flex max-w-[240px] items-center gap-2 rounded bg-mail-muted-surface px-2 py-1 text-xs"><FileBadge kind={fileKind(attachment)} className="h-4 w-4" /><span className="truncate font-medium text-mail-link">{attachment.filename}</span><span className="text-mail-secondary">({formatBytes(attachment.size)})</span></span>)}
                 </div>
               )}
               {/* New attachments */}
               {files.length > 0 && (
                 <ul className="flex flex-wrap gap-2 px-4 pb-3" aria-label="Attachments">
                   {files.map((file) => (
-                    <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex max-w-[280px] items-center gap-2 rounded bg-[#f2f2f2] py-1 pl-2 pr-1 text-xs">
-                      <GIcon name="attach" className="h-4 w-4 shrink-0 -rotate-45 text-[#5e5e5e]" />
-                      <span className="truncate font-medium text-[#0b57d0]">{file.name}</span>
-                      <span className="shrink-0 text-[#5e5e5e]">({formatBytes(file.size)})</span>
-                      <button type="button" onClick={() => setFiles((current) => current.filter((item) => item !== file))} aria-label={`Remove ${file.name}`} title="Remove" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#5e5e5e] hover:bg-[#1f1f1f14]"><GIcon name="close" className="h-3.5 w-3.5" /></button>
+                    <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex max-w-[280px] items-center gap-2 rounded bg-mail-muted-surface py-1 pl-2 pr-1 text-xs">
+                      <GIcon name="attach" className="h-4 w-4 shrink-0 -rotate-45 text-mail-secondary" />
+                      <span className="truncate font-medium text-mail-link">{file.name}</span>
+                      <span className="shrink-0 text-mail-secondary">({formatBytes(file.size)})</span>
+                      <button type="button" onClick={() => setFiles((current) => current.filter((item) => item !== file))} aria-label={`Remove ${file.name}`} title="Remove" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-mail-secondary hover:bg-mail-muted-surface"><GIcon name="close" className="h-3.5 w-3.5" /></button>
                     </li>
                   ))}
                 </ul>
               )}
-              {composeError && <p className="mx-4 mb-3 rounded bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{composeError}</p>}
+              {composeError && <p className="mx-4 mb-3 rounded bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">{composeError}</p>}
 
               {/* Remounted per compose mode so its font and size pickers start fresh. */}
               <FormatToolbar key={composeMode} editorRef={composerRef} onChange={syncComposer} className="mx-4 mb-2" />
@@ -1169,8 +1172,8 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
                   className="h-9 rounded-full bg-[#5b4bd6] px-6 text-sm font-medium text-white transition hover:bg-[#4b3dc0] hover:shadow-[0_1px_3px_1px_rgba(0,0,0,.15)] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => addFiles(event.target.files)} />
                 <ToolbarButton icon="attach" label="Attach files" onClick={() => fileInputRef.current?.click()} />
-                <span className="hidden text-xs text-[#9a9a9a] sm:inline">Ctrl + Enter to send</span>
-                <span className={`text-xs ${draftStatus === "error" ? "text-[#a50e0e]" : "text-[#5e5e5e]"}`} role="status">
+                <span className="hidden text-xs text-mail-muted sm:inline">Ctrl + Enter to send</span>
+                <span className={`text-xs ${draftStatus === "error" ? "text-mail-danger" : "text-mail-secondary"}`} role="status">
                   {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Saved to Drafts" : draftStatus === "error" ? "Draft not saved. Retrying when you type." : ""}
                 </span>
                 <span className="ml-auto" />
@@ -1186,22 +1189,22 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       {showAiPanel && (
         <aside className="mx-4 mt-6 lg:sticky lg:top-16 lg:mx-0 lg:mt-0">
           <CalendarSuggestions messageId={message.id} onAnalyzedPriority={onAnalyzedPriority} />
-          <div className="rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
-            <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#5b4bd6]">
+          <div className="rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-[0_1px_2px_rgba(60,64,67,.08)]">
+            <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-mail-accent">
               <GIcon name="sparkle" className="h-4 w-4" />Suggested reply
-              {suggestion.status === "ready" && <span className="font-normal normal-case tracking-normal text-[#7a7a7a]">{suggestion.cached ? "· saved" : "· just generated"}</span>}
+              {suggestion.status === "ready" && <span className="font-normal normal-case tracking-normal text-mail-muted">{suggestion.cached ? "· saved" : "· just generated"}</span>}
             </div>
 
             {suggestion.status === "skipped" && (
               <>
-                <div className="mb-4 flex gap-3 rounded-xl bg-[#f3f3f1] p-4">
+                <div className="mb-4 flex gap-3 rounded-xl bg-mail-muted-surface p-4">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5e5e5e] text-white"><GIcon name="unread" className="h-5 w-5" /></span>
                   <div className="text-sm">
-                    <p className="font-semibold text-[#1f1f1f]">Automated notification</p>
-                    <p className="mt-0.5 text-[#5e5e5e]">This sender appears automated, so no reply draft was generated. Important instructions and deadlines may still appear in Email insights above.</p>
+                    <p className="font-semibold text-foreground">Automated notification</p>
+                    <p className="mt-0.5 text-mail-secondary">This sender appears automated, so no reply draft was generated. Important instructions and deadlines may still appear in Email insights above.</p>
                   </div>
                 </div>
-                <p className="text-sm text-[#5e5e5e]">Notifications like this don&apos;t usually expect a reply — but you can still have one drafted if you need it.</p>
+                <p className="text-sm text-mail-secondary">Notifications like this don&apos;t usually expect a reply — but you can still have one drafted if you need it.</p>
                 <div className="mt-4 flex justify-end">
                   <button type="button" onClick={() => changeSuggestionOptions(aiTone, aiLength)} className="flex h-10 items-center gap-2 rounded-lg bg-[#5b4bd6] px-4 text-sm font-semibold text-white hover:bg-[#4b3dc0]"><GIcon name="reply" className="h-4 w-4" />Reply anyway</button>
                 </div>
@@ -1209,46 +1212,46 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
             )}
 
             {suggestion.status === "sent" && (
-              <div className="rounded-xl bg-[#e6f4ea] p-4 text-sm text-[#0d652d]">
+              <div className="rounded-xl bg-mail-success-tint p-4 text-sm text-mail-success">
                 <p className="font-semibold">Reply sent</p>
-                <p className="mt-1 whitespace-pre-wrap text-[#1f1f1f]/80">{suggestion.draft}</p>
+                <p className="mt-1 whitespace-pre-wrap text-foreground/80">{suggestion.draft}</p>
               </div>
             )}
 
             {(suggestion.status === "loading" || suggestion.status === "ready" || suggestion.status === "error") && (
               <>
-                <div className="relative rounded-xl border border-[#e3e3e3] bg-[#fbfbfb]">
+                <div className="relative rounded-xl border border-mail-line bg-mail-muted-surface">
                   <textarea value={suggestion.draft} onChange={(event) => setSuggestion((current) => ({ ...current, draft: event.target.value }))}
                     rows={10} aria-label="Suggested reply" disabled={suggestion.status === "loading"} placeholder={suggestion.status === "error" ? "" : "Generating a reply with AI…"}
-                    className="block min-h-[220px] w-full resize-y rounded-xl bg-transparent px-4 py-3 text-sm leading-6 text-[#1f1f1f] outline-none focus:ring-2 focus:ring-[#5b4bd6]/30 disabled:text-[#9a9a9a]" />
-                  {suggestion.status === "loading" && <span className="pointer-events-none absolute right-3 top-3 h-4 w-4 animate-spin rounded-full border-2 border-[#5b4bd6]/30 border-t-[#5b4bd6]" aria-hidden="true" />}
+                    className="block min-h-[220px] w-full resize-y rounded-xl bg-transparent px-4 py-3 text-sm leading-6 text-foreground outline-none focus:ring-2 focus:ring-mail-accent/30 disabled:text-mail-muted" />
+                  {suggestion.status === "loading" && <span className="pointer-events-none absolute right-3 top-3 h-4 w-4 animate-spin rounded-full border-2 border-mail-accent/30 border-t-[#5b4bd6]" aria-hidden="true" />}
                 </div>
-                {suggestion.status === "error" && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
-                {suggestion.status === "ready" && suggestion.message && <p className="mt-3 rounded-lg bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{suggestion.message}</p>}
+                {suggestion.status === "error" && <p className="mt-3 rounded-lg bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">{suggestion.message}</p>}
+                {suggestion.status === "ready" && suggestion.message && <p className="mt-3 rounded-lg bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">{suggestion.message}</p>}
 
                 <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); applyInstructions(); }}>
                   <input value={aiInstructions} onChange={(event) => setAiInstructions(event.target.value)} maxLength={500} disabled={suggestion.status === "loading"}
                     aria-label="Ask AI to change this reply" placeholder="Ask AI to change it, e.g. write it in English"
-                    className="h-10 min-w-0 flex-1 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm text-[#1f1f1f] outline-none focus:ring-2 focus:ring-[#5b4bd6]/30 disabled:text-[#9a9a9a]" />
+                    className="h-10 min-w-0 flex-1 rounded-lg border border-mail-line bg-mail-surface px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-mail-accent/30 disabled:text-mail-muted" />
                   <button type="submit" disabled={!aiInstructions.trim() || suggestion.status === "loading"}
-                    className="h-10 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">Apply</button>
+                    className="h-10 rounded-lg border border-mail-line bg-mail-surface px-3 text-sm font-semibold text-foreground hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-50">Apply</button>
                 </form>
 
                 <div className="mt-4 space-y-3">
-                  <label className="block text-xs text-[#5e5e5e]">
-                    <span className="flex justify-between">{TONE_STOPS.map((stop) => <span key={stop} className={stop === aiTone ? "font-medium text-[#1f1f1f]" : ""}>{toneLabel[stop]}</span>)}</span>
+                  <label className="block text-xs text-mail-secondary">
+                    <span className="flex justify-between">{TONE_STOPS.map((stop) => <span key={stop} className={stop === aiTone ? "font-medium text-foreground" : ""}>{toneLabel[stop]}</span>)}</span>
                     <input type="range" min={0} max={TONE_STOPS.length - 1} step={1} value={TONE_STOPS.indexOf(aiTone)} disabled={suggestion.status === "loading"}
                       onChange={(event) => changeSuggestionOptions(TONE_STOPS[Number(event.target.value)], aiLength)} aria-label="Reply tone" className="mt-1 w-full accent-[#5b4bd6]" />
                   </label>
-                  <label className="block text-xs text-[#5e5e5e]">
-                    <span className="flex justify-between">{LENGTH_STOPS.map((stop) => <span key={stop} className={stop === aiLength ? "font-medium text-[#1f1f1f]" : ""}>{lengthLabel[stop]}</span>)}</span>
+                  <label className="block text-xs text-mail-secondary">
+                    <span className="flex justify-between">{LENGTH_STOPS.map((stop) => <span key={stop} className={stop === aiLength ? "font-medium text-foreground" : ""}>{lengthLabel[stop]}</span>)}</span>
                     <input type="range" min={0} max={LENGTH_STOPS.length - 1} step={1} value={LENGTH_STOPS.indexOf(aiLength)} disabled={suggestion.status === "loading"}
                       onChange={(event) => changeSuggestionOptions(aiTone, LENGTH_STOPS[Number(event.target.value)])} aria-label="Reply length" className="mt-1 w-full accent-[#5b4bd6]" />
                   </label>
                 </div>
 
                 {canReplyAll && (
-                  <label className="mt-3 flex items-center gap-2 text-xs text-[#5e5e5e]">
+                  <label className="mt-3 flex items-center gap-2 text-xs text-mail-secondary">
                     <input type="checkbox" checked={replyAll} onChange={(event) => setReplyAll(event.target.checked)} className="accent-[#5b4bd6]" />
                     Reply to everyone ({otherRecipients.map((recipient) => formatSender(recipient)).join(", ")})
                   </label>
@@ -1256,7 +1259,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button type="button" onClick={regenerateSuggestion} disabled={suggestion.status === "loading" || sendingSuggestion}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-[#d9d9d9] bg-white px-3 text-sm font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50">
+                    className="flex h-10 items-center gap-2 rounded-lg border border-mail-line bg-mail-surface px-3 text-sm font-semibold text-foreground hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-50">
                     <GIcon name="sparkle" className="h-4 w-4" />Regenerate
                   </button>
                   <button type="button" onClick={() => void sendSuggestion()} disabled={suggestion.status !== "ready" || !suggestion.draft.trim() || sendingSuggestion}
@@ -1274,14 +1277,14 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       {/* ---------- Bottom action bar: stays pinned to the bottom of the screen while the message scrolls.
           Reply here always opens a blank composer, independent of the AI suggestion. ---------- */}
       {!composeMode && (!message.draft || onDelete) && (
-        <div className="sticky bottom-0 z-20 border-t border-[#e3e3e3] bg-white/95 shadow-[0_-1px_4px_rgba(60,64,67,.08)] backdrop-blur-sm">
+        <div className="sticky bottom-0 z-20 border-t border-mail-line bg-mail-surface/95 shadow-[0_-1px_4px_rgba(60,64,67,.08)] backdrop-blur-sm">
           <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:pl-[72px] lg:pl-[96px] lg:pr-6">
             {!message.draft && <button type="button" onClick={() => openComposer("reply")} className={pillClass}><GIcon name="reply" />Reply</button>}
             {canReplyAll && <button type="button" onClick={() => openComposer("replyAll")} className={pillClass}><GIcon name="replyAll" />Reply all</button>}
             {!message.draft && <button type="button" onClick={() => openComposer("forward")} className={pillClass}><GIcon name="forward" />Forward</button>}
             {onDelete && (
               <button type="button" onClick={onDelete} disabled={deleting}
-                className={`${pillClass} ml-auto hover:border-[#b3261e] hover:bg-[#fce8e6] hover:text-[#b3261e] disabled:cursor-not-allowed disabled:opacity-50`}>
+                className={`${pillClass} ml-auto hover:border-mail-danger-line hover:bg-mail-danger-tint hover:text-mail-danger disabled:cursor-not-allowed disabled:opacity-50`}>
                 <GIcon name="trash" />{deleting ? "Deleting…" : "Trash"}
               </button>
             )}

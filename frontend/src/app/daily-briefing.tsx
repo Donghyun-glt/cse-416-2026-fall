@@ -81,9 +81,9 @@ function useInsights(ids: string[], onPriority: (id: string, priority: Priority)
 }
 
 const sections: Record<Priority, { label: string; header: string; dot: string }> = {
-  urgent: { label: "Urgent", header: "bg-[#fce9e9] text-[#a82f35]", dot: "bg-[#d2444b]" },
-  fyi: { label: "FYI", header: "bg-[#fbf2dc] text-[#89651f]", dot: "bg-[#c9952b]" },
-  low: { label: "Low Priority", header: "bg-[#e8f1ee] text-[#416c60]", dot: "bg-[#5d9483]" },
+  urgent: { label: "Urgent", header: "bg-mail-danger-tint text-mail-danger", dot: "bg-[#d2444b]" },
+  fyi: { label: "FYI", header: "bg-mail-warning-tint text-mail-warning", dot: "bg-[#c9952b]" },
+  low: { label: "Low Priority", header: "bg-mail-success-tint text-mail-success", dot: "bg-[#5d9483]" },
 };
 const avatarColors = ["#b64b3b", "#4674a0", "#7751b2", "#4b806a", "#8f7a44"];
 
@@ -118,21 +118,21 @@ function BriefingCard({ message, insight, color, onOpen }: { message: Mail; insi
   const calendar = eventStatus(insight);
   const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
   return <button type="button" onClick={() => onOpen(message)}
-    className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-[0_3px_12px_rgba(31,31,27,0.08)] ${message.unread ? "border-[#dcd8ee] bg-white" : "border-[#e6e4de] bg-[#f6f5f2]"}`}>
+    className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition hover:shadow-[0_3px_12px_rgba(31,31,27,0.08)] ${message.unread ? "border-mail-accent-line bg-mail-surface" : "border-mail-line bg-mail-muted-surface"}`}>
     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white" style={{ backgroundColor: color }}>{initials(sender)}</span>
     <span className="min-w-0 flex-1">
       <span className="flex items-center gap-2">
-        <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold text-[#55524c]"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject || "(no subject)"}</span></span>
+        <span className={`min-w-0 flex-1 truncate text-sm ${message.unread ? "font-extrabold" : "font-semibold text-mail-secondary"}`}>{sender} <span className={message.unread ? "font-bold" : "font-medium"}>— {message.subject || "(no subject)"}</span></span>
         {message.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-[#5944d8]" aria-label="Unread" />}
-        <time className="shrink-0 text-xs text-[#96938b]">{timeLabel(message.date)}</time>
+        <time className="shrink-0 text-xs text-mail-muted">{timeLabel(message.date)}</time>
       </span>
       {insight === undefined
-        ? <span className="mt-2 block space-y-1.5" aria-label="Summarizing"><span className="block h-2.5 w-full animate-pulse rounded bg-[#eceae5]" /><span className="block h-2.5 w-1/2 animate-pulse rounded bg-[#eceae5]" /></span>
-        : <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-[#6f6b64]">{insight?.summary || message.snippet}</span>}
+        ? <span className="mt-2 block space-y-1.5" aria-label="Summarizing"><span className="block h-2.5 w-full animate-pulse rounded bg-mail-hover" /><span className="block h-2.5 w-1/2 animate-pulse rounded bg-mail-hover" /></span>
+        : <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-mail-muted">{insight?.summary || message.snippet}</span>}
       {(calendar || message.hasDraft || hasAttachment) && <span className="mt-2 flex flex-wrap items-center gap-1.5">
-        {calendar && <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${calendar.added ? "bg-[#e6f4ea] text-[#256c3b]" : "bg-[#eeecfb] text-[#5742d5]"}`}><CalendarGlyph /><span className="truncate">{calendar.added ? "Added" : "Add to calendar?"} · {eventLabel(calendar.event)}</span></span>}
-        {message.hasDraft && <span className="rounded-full bg-[#fce8e6] px-2.5 py-1 text-xs font-bold text-[#c5221f]">Draft</span>}
-        {hasAttachment && <span className="rounded-full bg-[#efeee9] px-2.5 py-1 text-xs font-bold text-[#655f58]">Attachment</span>}
+        {calendar && <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${calendar.added ? "bg-mail-success-tint text-mail-success" : "bg-mail-accent-tint text-mail-accent"}`}><CalendarGlyph /><span className="truncate">{calendar.added ? "Added" : "Add to calendar?"} · {eventLabel(calendar.event)}</span></span>}
+        {message.hasDraft && <span className="rounded-full bg-mail-danger-tint px-2.5 py-1 text-xs font-bold text-mail-danger">Draft</span>}
+        {hasAttachment && <span className="rounded-full bg-mail-muted-surface px-2.5 py-1 text-xs font-bold text-mail-secondary">Attachment</span>}
       </span>}
     </span>
   </button>;

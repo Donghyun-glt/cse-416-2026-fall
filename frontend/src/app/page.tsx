@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getGmailSession } from "@/lib/gmail-session";
+import { MAIL_THEME_COOKIE } from "@/lib/mail-theme";
 import { MailClient } from "./mail-client";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
@@ -15,11 +16,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   }
 
   const { error } = await searchParams;
-  const sessionId = (await cookies()).get("gmail_session")?.value;
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get("gmail_session")?.value;
   const connected = Boolean(sessionId && await getGmailSession(sessionId));
 
   const googleConfigured = Boolean(
     process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI,
   );
-  return <MailClient initialConnected={connected} loginError={error || (googleConfigured ? undefined : "oauth_not_configured")} />;
+  return <MailClient
+    initialConnected={connected}
+    initialTheme={cookieStore.get(MAIL_THEME_COOKIE)?.value === "dark" ? "dark" : "light"}
+    loginError={error || (googleConfigured ? undefined : "oauth_not_configured")}
+  />;
 }

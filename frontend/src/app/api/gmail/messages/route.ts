@@ -1,15 +1,64 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
+import { google, type gmail_v1 } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { attachGmailSessionToUser, getGmailSessionWithUser } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { getOrAssignPriorities } from "@/lib/gmail-priority";
-import { upsertUser } from "@/lib/mailflow-db";
+import { getStoredPriorities, getUrgentMessageSummaries, upsertUser } from "@/lib/mailflow-db";
 import { comparePriority } from "@/lib/mail-priority";
 
 // Lists only need what a row shows. Bodies and attachments are fetched by
 // GET /api/gmail/messages/[id] when the user opens a message.
 const LIST_HEADERS = ["Subject", "From", "To", "Cc", "Date", "List-Unsubscribe"];
+const SUMMARY_DISCOVERY_SIZE = 50;
+const SUMMARY_METADATA_CONCURRENCY = 10;
+
+async function getMetadata(gmail: gmail_v1.Gmail, id: string) {
+  const { data } = await gmail.users.messages.get({
+    userId: "me", id, format: "metadata", metadataHeaders: LIST_HEADERS,
+  });
+  return data;
+}
+
+function isReceivedMessage(data: gmail_v1.Schema$Message) {
+  return !data.labelIds?.some((label) => ["SENT", "DRAFT", "SPAM", "TRASH"].includes(label));
+}
+
+async function getSummaryMetadata(gmail: gmail_v1.Gmail, ids: string[]) {
+  const messages = new Map<string, gmail_v1.Schema$Message>();
+  for (let offset = 0; offset < ids.length; offset += SUMMARY_METADATA_CONCURRENCY) {
+    await Promise.all(ids.slice(offset, offset + SUMMARY_METADATA_CONCURRENCY).map(async (id) => {
+      try {
+        messages.set(id, await getMetadata(gmail, id));
+      } catch (error) {
+        // A permanently deleted message can still have a stored priority.
+        if ((error as { code?: unknown })?.code !== 404) throw error;
+      }
+    }));
+  }
+  return messages;
+}
+
+async function loadSummary(gmail: gmail_v1.Gmail, userId: number) {
+  // Discover newly arrived mail even when Summary is the only view open.
+  // Older messages remain eligible through their stored MailFlow priority.
+  const { data } = await gmail.users.messages.list({ userId: "me", maxResults: SUMMARY_DISCOVERY_SIZE, q: "-in:sent -in:drafts" });
+  const recentIds = (data.messages ?? []).flatMap(({ id }) => id ? [id] : []);
+  const stored = await getStoredPriorities(userId, recentIds);
+  const recent = await getSummaryMetadata(gmail, recentIds.filter((id) => !stored.has(id)));
+  await getOrAssignPriorities([...recent.values()].filter(isReceivedMessage), userId);
+
+  const urgent = await getUrgentMessageSummaries(userId);
+  const metadata = await getSummaryMetadata(gmail, urgent.flatMap(({ gmail_message_id: id }) => recent.has(id) ? [] : [id]));
+  return urgent.flatMap(({ gmail_message_id: id, summary }) => {
+    const message = recent.get(id) ?? metadata.get(id);
+    return message && isReceivedMessage(message) ? [{ message, summary }] : [];
+  }).sort((a, b) => Number(b.message.internalDate ?? 0) - Number(a.message.internalDate ?? 0))
+    .map(({ message, summary }) => ({
+      ...parseGmailMessage(message), html: "", priority: "urgent", partial: true,
+      summary: summary?.trim() || undefined,
+    }));
+}
 
 export async function GET(request: NextRequest) {
   const sessionId = request.cookies.get("gmail_session")?.value;
@@ -47,6 +96,10 @@ export async function GET(request: NextRequest) {
       const gmailProfile = await gmail.users.getProfile({ userId: "me" });
       userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
       await attachGmailSessionToUser(sessionId, userId);
+    }
+
+    if (requestedMode === "summary") {
+      return NextResponse.json({ connected: true, messages: await loadSummary(gmail, userId) });
     }
 
     const messageIds: string[] = [];
@@ -103,14 +156,7 @@ export async function GET(request: NextRequest) {
       .then((result) => new Set((result.data.drafts ?? []).flatMap((draft) => (draft.message?.threadId ? [draft.message.threadId] : []))))
       .catch(() => new Set<string>());
 
-    const fetched = await Promise.all(
-      messageIds.map(async (id) => (await gmail.users.messages.get({
-        userId: "me",
-        id,
-        format: "metadata",
-        metadataHeaders: LIST_HEADERS,
-      })).data),
-    );
+    const fetched = await Promise.all(messageIds.map((id) => getMetadata(gmail, id)));
     const priorities = await getOrAssignPriorities(
       fetched.filter((message) => !message.labelIds?.includes("DRAFT")),
       userId,

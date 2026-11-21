@@ -151,24 +151,24 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
     finally { setSending(false); }
   }
 
-  const row = "flex items-center gap-2 border-b border-[#ececec] px-4 text-sm";
-  const input = "min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-[#9a9a9a]";
+  const row = "flex items-center gap-2 border-b border-mail-line px-4 text-sm";
+  const input = "min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-mail-muted";
   return (
-    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-xl border border-[#d9d9d9] bg-white shadow-[0_8px_30px_rgba(0,0,0,.25)] sm:right-6 ${minimized ? "sm:w-[300px]" : "max-h-[90vh] sm:w-[620px]"}`}>
-      <header className="flex h-10 shrink-0 cursor-pointer items-center gap-1 bg-[#f2f6fc] pl-4 pr-1 text-sm font-semibold text-[#1f1f1f]" onClick={() => setMinimized((value) => !value)}>
+    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-xl border border-mail-line bg-mail-surface shadow-[0_8px_30px_rgba(0,0,0,.25)] sm:right-6 ${minimized ? "sm:w-[300px]" : "max-h-[90vh] sm:w-[620px]"}`}>
+      <header className="flex h-10 shrink-0 cursor-pointer items-center gap-1 bg-mail-muted-surface pl-4 pr-1 text-sm font-semibold text-foreground" onClick={() => setMinimized((value) => !value)}>
         <span className="min-w-0 flex-1 truncate">{subject.trim() || "New Message"}</span>
-        <button type="button" onClick={(event) => { event.stopPropagation(); setMinimized((value) => !value); }} aria-label={minimized ? "Expand" : "Minimize"} title={minimized ? "Expand" : "Minimize"} className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-[#444746] hover:bg-[#1f1f1f14]">{minimized ? "▴" : "–"}</button>
-        <button type="button" onClick={(event) => { event.stopPropagation(); void close(); }} aria-label="Save and close" title="Save & close" className="flex h-8 w-8 items-center justify-center rounded text-[#444746] hover:bg-[#1f1f1f14]"><GIcon name="close" className="h-4 w-4" /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); setMinimized((value) => !value); }} aria-label={minimized ? "Expand" : "Minimize"} title={minimized ? "Expand" : "Minimize"} className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-mail-secondary hover:bg-mail-hover">{minimized ? "▴" : "–"}</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); void close(); }} aria-label="Save and close" title="Save & close" className="flex h-8 w-8 items-center justify-center rounded text-mail-secondary hover:bg-mail-hover"><GIcon name="close" className="h-4 w-4" /></button>
       </header>
       {/* Hidden, not unmounted, while minimized so the text and formatting survive. */}
       <div className={minimized ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-        <label className={row}><span className="shrink-0 text-[#5e5e5e]">To</span>
+        <label className={row}><span className="shrink-0 text-mail-secondary">To</span>
           <input value={to} onChange={(event) => setTo(event.target.value)} type="text" inputMode="email" autoFocus={!initial} aria-label="To" placeholder="name@example.com, another@example.com" className={input} />
-          {!showCopies && <button type="button" onClick={() => setShowCopies(true)} className="shrink-0 text-xs text-[#5e5e5e] hover:underline">Cc Bcc</button>}
+          {!showCopies && <button type="button" onClick={() => setShowCopies(true)} className="shrink-0 text-xs text-mail-secondary hover:underline">Cc Bcc</button>}
         </label>
         {showCopies && <>
-          <label className={row}><span className="shrink-0 text-[#5e5e5e]">Cc</span><input value={cc} onChange={(event) => setCc(event.target.value)} type="text" inputMode="email" aria-label="Cc" className={input} /></label>
-          <label className={row}><span className="shrink-0 text-[#5e5e5e]">Bcc</span><input value={bcc} onChange={(event) => setBcc(event.target.value)} type="text" inputMode="email" aria-label="Bcc" className={input} /></label>
+          <label className={row}><span className="shrink-0 text-mail-secondary">Cc</span><input value={cc} onChange={(event) => setCc(event.target.value)} type="text" inputMode="email" aria-label="Cc" className={input} /></label>
+          <label className={row}><span className="shrink-0 text-mail-secondary">Bcc</span><input value={bcc} onChange={(event) => setBcc(event.target.value)} type="text" inputMode="email" aria-label="Bcc" className={input} /></label>
         </>}
         <label className={row}><input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={500} aria-label="Subject" placeholder="Subject" className={input} /></label>
 
@@ -187,16 +187,16 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
         {files.length > 0 && (
           <ul className="flex flex-wrap gap-2 px-4 pb-3" aria-label="Attachments">
             {files.map((file) => (
-              <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex max-w-[280px] items-center gap-2 rounded bg-[#f2f2f2] py-1 pl-2 pr-1 text-xs">
-                <GIcon name="attach" className="h-4 w-4 shrink-0 -rotate-45 text-[#5e5e5e]" />
-                <span className="truncate font-medium text-[#0b57d0]">{file.name}</span>
-                <span className="shrink-0 text-[#5e5e5e]">({formatBytes(file.size)})</span>
-                <button type="button" onClick={() => setFiles((current) => current.filter((item) => item !== file))} aria-label={`Remove ${file.name}`} title="Remove" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#5e5e5e] hover:bg-[#1f1f1f14]"><GIcon name="close" className="h-3.5 w-3.5" /></button>
+              <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex max-w-[280px] items-center gap-2 rounded bg-mail-muted-surface py-1 pl-2 pr-1 text-xs">
+                <GIcon name="attach" className="h-4 w-4 shrink-0 -rotate-45 text-mail-secondary" />
+                <span className="truncate font-medium text-mail-link">{file.name}</span>
+                <span className="shrink-0 text-mail-secondary">({formatBytes(file.size)})</span>
+                <button type="button" onClick={() => setFiles((current) => current.filter((item) => item !== file))} aria-label={`Remove ${file.name}`} title="Remove" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-mail-secondary hover:bg-mail-muted-surface"><GIcon name="close" className="h-3.5 w-3.5" /></button>
               </li>
             ))}
           </ul>
         )}
-        {error && <p role="alert" className="mx-4 mb-3 rounded bg-[#fce8e6] px-3 py-2 text-xs text-[#a50e0e]">{error}</p>}
+        {error && <p role="alert" className="mx-4 mb-3 rounded bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">{error}</p>}
 
         <FormatToolbar editorRef={editorRef} onChange={syncBody} className="mx-4 mb-2" />
 
@@ -204,7 +204,7 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
           <button type="button" onClick={() => void send()} disabled={!canSend} className="h-9 rounded-full bg-[#5b4bd6] px-6 text-sm font-medium text-white transition hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
           <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => addFiles(event.target.files)} />
           <ToolbarButton icon="attach" label="Attach files" onClick={() => fileInputRef.current?.click()} />
-          <span className={`text-xs ${draftStatus === "error" ? "text-[#a50e0e]" : "text-[#5e5e5e]"}`} role="status">
+          <span className={`text-xs ${draftStatus === "error" ? "text-mail-danger" : "text-mail-secondary"}`} role="status">
             {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Saved to Drafts" : draftStatus === "error" ? "Draft not saved. Retrying when you type." : ""}
           </span>
           <span className="ml-auto" />

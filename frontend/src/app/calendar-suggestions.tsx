@@ -96,36 +96,36 @@ function Candidate({ candidate, candidateKey, messageId, initial }: { candidate:
     finally { setSaving(false); }
   }
   if (status === "dismissed") return null;
-  if (status === "saved") return <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-800">Added to calendar: {title}</p>;
-  const field = "mt-1 w-full rounded-lg border border-[#d8d5df] p-2 text-sm";
+  if (status === "saved") return <p role="status" className="rounded-xl bg-mail-success-tint p-3 text-sm text-mail-success">Added to calendar: {title}</p>;
+  const field = "mt-1 w-full rounded-lg border border-mail-line p-2 text-sm";
   const checks = candidate.warnings?.length ?? 0;
   const assumed = !candidate.endTime || !candidate.timeZone;
   const shownDate = allDay ? date : start.slice(0, 10) || date;
   const shownTime = allDay || start.length < 16 ? null : start.slice(11, 16);
-  return <article className="rounded-xl border border-[#ded8f7] p-4 text-sm">
+  return <article className="rounded-xl border border-mail-accent-line p-4 text-sm">
     <p className="font-semibold">{title}</p>
-    <p className="mt-1 text-[#666]">{whenLabel(shownDate, shownTime)}{candidate.timeZone ? ` · ${candidate.timeZone}` : ""}{location ? ` · ${location}` : ""}</p>
-    <details className="mt-2 text-xs text-[#666]">
-      <summary className="cursor-pointer text-[#5944d8]">Details{checks ? ` · ${checks} to check` : ""}</summary>
-      {[candidate.evidence, ...(candidate.supportingEvidence ?? []).filter((quote) => !candidate.evidence.includes(quote))].map((quote, index) => <blockquote key={index} className="mt-2 whitespace-pre-wrap border-l-2 border-[#b9acf4] pl-3">{quote}</blockquote>)}
+    <p className="mt-1 text-mail-secondary">{whenLabel(shownDate, shownTime)}{candidate.timeZone ? ` · ${candidate.timeZone}` : ""}{location ? ` · ${location}` : ""}</p>
+    <details className="mt-2 text-xs text-mail-secondary">
+      <summary className="cursor-pointer text-mail-accent">Details{checks ? ` · ${checks} to check` : ""}</summary>
+      {[candidate.evidence, ...(candidate.supportingEvidence ?? []).filter((quote) => !candidate.evidence.includes(quote))].map((quote, index) => <blockquote key={index} className="mt-2 whitespace-pre-wrap border-l-2 border-mail-accent-line pl-3">{quote}</blockquote>)}
       {Boolean(candidate.notes?.length) && <ul className="mt-2 list-disc space-y-1 pl-4">{candidate.notes!.map((note, index) => <li key={index}>{note}</li>)}</ul>}
-      {checks > 0 && <ul className="mt-2 list-disc space-y-1 rounded-lg bg-amber-50 p-3 pl-6 text-amber-900">{candidate.warnings!.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+      {checks > 0 && <ul className="mt-2 list-disc space-y-1 rounded-lg bg-mail-warning-tint p-3 pl-6 text-mail-warning">{candidate.warnings!.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
     </details>
-    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white">Edit &amp; add</button><button onClick={() => setStatus("dismissed")} className="px-2 py-2 text-[#666]">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-[#ece9f7] pt-3">
+    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white">Edit &amp; add</button><button onClick={() => setStatus("dismissed")} className="px-2 py-2 text-mail-secondary">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-mail-accent-line pt-3">
       <label className="block">Title<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={field} /></label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={allDay} onChange={(e) => { setAllDay(e.target.checked); setChecked(false); }} />All day</label>
       {allDay ? <label className="block">Date<input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={field} /></label> : <>
         <label className="block">Start<input type="datetime-local" required value={start} onChange={(e) => changeStart(e.target.value)} className={field} /></label>
         <label className="block">End<input type="datetime-local" required value={end} onChange={(e) => setEnd(e.target.value)} className={field} /></label>
         <label className="block">Time zone<input required placeholder="Asia/Seoul" value={zone} onChange={(e) => setZone(e.target.value)} className={field} /></label>
-        {assumed && <p className="text-xs text-amber-900">End time and time zone are defaults when the email does not state them.</p>}
+        {assumed && <p className="text-xs text-mail-warning">End time and time zone are defaults when the email does not state them.</p>}
       </>}
       <label className="block">Location<input maxLength={500} value={location} onChange={(e) => setLocation(e.target.value)} className={field} /></label>
       <label className="block">Notes<textarea rows={3} maxLength={8000} value={description} onChange={(e) => setDescription(e.target.value)} className={field} /></label>
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" required checked={checked} onChange={(e) => setChecked(e.target.checked)} />I checked these details.</label>
-      <div className="flex gap-3"><button disabled={!checked || saving} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Add to calendar"}</button><button type="button" disabled={saving} onClick={() => setEditing(false)} className="px-2 py-2 text-[#666]">Cancel</button></div>
+      <div className="flex gap-3"><button disabled={!checked || saving} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Add to calendar"}</button><button type="button" disabled={saving} onClick={() => setEditing(false)} className="px-2 py-2 text-mail-secondary">Cancel</button></div>
     </form>}
-    {error && <p role="alert" className="mt-3 text-xs text-red-700">{error} {error === errorMessages.calendar_authorization_required && <a href="/api/google/connect" className="underline">Reconnect Google</a>}</p>}
+    {error && <p role="alert" className="mt-3 text-xs text-mail-danger">{error} {error === errorMessages.calendar_authorization_required && <a href="/api/google/connect" className="underline">Reconnect Google</a>}</p>}
   </article>;
 }
 
@@ -158,14 +158,14 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
     return () => { clearTimeout(timeout); controller.abort(); };
   }, [messageId, retry, onAnalyzedPriority]);
   const keys = candidateKeys(candidates);
-  return <section className="mb-4 space-y-4 rounded-2xl border border-[#e3e3e3] bg-white p-5 shadow-sm" aria-label="Email insights">
-    <h2 className="text-xs font-bold uppercase tracking-wide text-[#5944d8]">Email insights</h2>
+  return <section className="mb-4 space-y-4 rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-sm" aria-label="Email insights">
+    <h2 className="text-xs font-bold uppercase tracking-wide text-mail-accent">Email insights</h2>
     {analysis && <>
       <p className="text-sm leading-6">{analysis.reason}</p>
-      {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">{note}</p>)}
+      {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-mail-warning-tint p-3 text-xs text-mail-warning">{note}</p>)}
     </>}
-    <div className="border-t border-[#e3e3e3] pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-[#5944d8]">Suggested events</h3>{status && <p role="status" className="text-xs text-[#666]">{status}</p>}</div>
-    {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-[#5944d8] underline">Retry analysis</button>}
+    <div className="border-t border-mail-line pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-mail-accent">Suggested events</h3>{status && <p role="status" className="text-xs text-mail-secondary">{status}</p>}</div>
+    {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-mail-accent underline">Retry analysis</button>}
     {candidates.map((candidate, index) => <Candidate key={keys[index]} candidate={candidate} candidateKey={keys[index]} messageId={messageId} initial={eventStates[keys[index]]} />)}
   </section>;
 }

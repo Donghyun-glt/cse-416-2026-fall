@@ -53,6 +53,10 @@ export async function createGmailSession(tokens: Credentials) {
   return sessionId;
 }
 
+export async function deleteGmailSession(sessionId: string) {
+  await query("DELETE FROM oauth_sessions WHERE session_hash = $1", [sessionHash(sessionId)]);
+}
+
 export async function getGmailSession(sessionId: string): Promise<Credentials | undefined> {
   const result = await query<{ token_ciphertext: string }>(`
     UPDATE oauth_sessions

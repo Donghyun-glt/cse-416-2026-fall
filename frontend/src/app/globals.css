@@ -3,11 +3,74 @@
 :root {
   --background: #f7f7f4;
   --foreground: #252521;
+  --mail-surface: #fff;
+  --mail-muted-surface: #f4f3f0;
+  --mail-hover: #eeece8;
+  --mail-line: #e4e2dd;
+  --mail-line-strong: #85817a;
+  --mail-secondary: #59564f;
+  --mail-muted: #716e65;
+  --mail-accent: #5944d8;
+  --mail-accent-tint: #eeecfb;
+  --mail-accent-highlight: #e4e0fb;
+  --mail-accent-line: #c5baf0;
+  --mail-danger: #a82f35;
+  --mail-danger-tint: #fce9e9;
+  --mail-danger-line: #efc0c1;
+  --mail-warning: #755213;
+  --mail-warning-tint: #fbf2dc;
+  --mail-success: #326653;
+  --mail-success-tint: #e8f1ee;
+  --mail-link: #0b57d0;
+}
+
+:root:has([data-mail-theme="dark"]) {
+  color-scheme: dark;
+  --background: #15141b;
+  --foreground: #f0edf6;
+  --mail-surface: #201e29;
+  --mail-muted-surface: #292634;
+  --mail-hover: #332f40;
+  --mail-line: #3c3849;
+  --mail-line-strong: #888198;
+  --mail-secondary: #c5bfd2;
+  --mail-muted: #aaa3ba;
+  --mail-accent: #c3b7ff;
+  --mail-accent-tint: #302849;
+  --mail-accent-highlight: #3c315b;
+  --mail-accent-line: #65578a;
+  --mail-danger: #ffabb1;
+  --mail-danger-tint: #482a35;
+  --mail-danger-line: #79434d;
+  --mail-warning: #f2d299;
+  --mail-warning-tint: #403324;
+  --mail-success: #a7e0c4;
+  --mail-success-tint: #243d35;
+  --mail-link: #a5c7ff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-mail-surface: var(--mail-surface);
+  --color-mail-muted-surface: var(--mail-muted-surface);
+  --color-mail-hover: var(--mail-hover);
+  --color-mail-line: var(--mail-line);
+  --color-mail-line-strong: var(--mail-line-strong);
+  --color-mail-secondary: var(--mail-secondary);
+  --color-mail-muted: var(--mail-muted);
+  --color-mail-accent: var(--mail-accent);
+  --color-mail-accent-tint: var(--mail-accent-tint);
+  --color-mail-accent-highlight: var(--mail-accent-highlight);
+  --color-mail-accent-line: var(--mail-accent-line);
+  --color-mail-danger: var(--mail-danger);
+  --color-mail-danger-tint: var(--mail-danger-tint);
+  --color-mail-danger-line: var(--mail-danger-line);
+  --color-mail-warning: var(--mail-warning);
+  --color-mail-warning-tint: var(--mail-warning-tint);
+  --color-mail-success: var(--mail-success);
+  --color-mail-success-tint: var(--mail-success-tint);
+  --color-mail-link: var(--mail-link);
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Cascadia Code", Consolas, monospace;
 }
@@ -33,6 +96,6 @@ a {
 
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid rgba(91, 70, 214, 0.28);
-  outline-offset: 3px;
+  outline: 2px solid var(--mail-accent);
+  outline-offset: 2px;
 }

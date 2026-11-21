@@ -1,4 +1,5 @@
 export const GOOGLE_LOGIN_CHANNEL = "mailflow-google-login";
+export const GOOGLE_REAUTH_ATTEMPT_KEY = "mailflow-profile-reauth-attempted";
 
 export function googleLoginError(error?: string) {
   switch (error) {

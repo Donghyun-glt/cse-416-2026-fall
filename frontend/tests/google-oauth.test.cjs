@@ -3,13 +3,14 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
+const { createHash } = require("node:crypto");
 const vm = require("node:vm");
 const ts = require("typescript");
 const { NextRequest } = require("next/server");
 
 // Run the real route handlers with a fake Google service. No credentials or
 // network calls are needed, and tokens never leave the test process.
-function handler(route, configured = true) {
+function handler(route, configured = true, options = {}) {
   const sessions = new Map();
   let authorization;
   const client = {
@@ -28,7 +29,7 @@ function handler(route, configured = true) {
   }).outputText;
   const exports = {};
   vm.runInNewContext(compiled, {
-    exports, URL, console,
+    exports, URL, console: options.console ?? console,
     process: { env: configured ? {
       NODE_ENV: "production", GOOGLE_CLIENT_ID: "app-client",
       GOOGLE_CLIENT_SECRET: "app-secret", GOOGLE_REDIRECT_URI: "https://mailflow.test/api/google/callback",
@@ -47,15 +48,19 @@ function handler(route, configured = true) {
           sessions.set(sealed, tokens);
           return sealed;
         },
+        deleteGmailSession: async (sessionId) => {
+          if (options.failDelete) throw new Error("Database unavailable");
+          sessions.delete(sessionId);
+        },
       };
       return require(name);
     },
   });
-  return { GET: exports.GET, sessions, authorization: () => authorization };
+  return { GET: exports.GET, POST: exports.POST, sessions, authorization: () => authorization };
 }
 
-function request(path, cookie = "") {
-  return new NextRequest(`https://mailflow.test${path}`, { headers: { cookie } });
+function request(path, cookie = "", init = {}) {
+  return new NextRequest(`https://mailflow.test${path}`, { ...init, headers: { cookie, ...init.headers } });
 }
 
 test("login requests account selection, Gmail consent, and offline access", async () => {
@@ -113,7 +118,7 @@ test("denied consent returns an error and clears the OAuth attempt", async () =>
   assert.equal(route.sessions.size, 0);
 });
 
-function sessionModule(secret) {
+function sessionModule(secret, query = async () => ({ rows: [] })) {
   const source = readFileSync(resolve(__dirname, "../src/lib/gmail-session.ts"), "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -122,7 +127,7 @@ function sessionModule(secret) {
   vm.runInNewContext(compiled, {
     exports, Buffer, JSON, process: { env: { SESSION_SECRET: secret } },
     require(name) {
-      if (name === "./postgres") return { query: async () => ({ rows: [] }) };
+      if (name === "./postgres") return { query };
       return require(name);
     },
   });
@@ -145,4 +150,48 @@ test("tampered or foreign session cookies are rejected", () => {
   assert.equal(openGmailTokens(tampered), undefined);
   assert.equal(openGmailTokens("not-a-session"), undefined);
   assert.equal(sessionModule("other-secret").openGmailTokens(sealed), undefined);
+});
+
+test("logout ends only the current session and expires its cookies on every retry", async () => {
+  const route = handler("logout");
+  route.sessions.set("current", {});
+  route.sessions.set("another-device", {});
+  const post = () => route.POST(request("/api/google/logout", "gmail_session=current; mailflow_theme=dark", {
+    method: "POST", headers: { "sec-fetch-site": "same-origin" },
+  }));
+
+  for (const response of [await post(), await post()]) {
+    assert.equal(response.status, 204);
+    for (const name of ["gmail_session", "gmail_oauth_state", "gmail_oauth_popup"]) {
+      assert.equal(response.cookies.get(name).maxAge, 0);
+      assert.equal(response.cookies.get(name).path, "/");
+    }
+    assert.equal(response.cookies.get("mailflow_theme"), undefined);
+  }
+  assert.deepEqual([...route.sessions.keys()], ["another-device"]);
+});
+
+test("logout preserves the session on cross-origin requests and database failures", async () => {
+  const route = handler("logout", true, { failDelete: true, console: { error() {} } });
+  route.sessions.set("current", {});
+  for (const [fetchSite, status] of [["same-site", 403], ["same-origin", 503]]) {
+    const response = await route.POST(request("/api/google/logout", "gmail_session=current", {
+      method: "POST", headers: { "sec-fetch-site": fetchSite },
+    }));
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get("set-cookie"), null);
+    assert.ok(route.sessions.has("current"));
+  }
+});
+
+test("session deletion targets the stored hash of the opaque session ID", async () => {
+  let queryCalls = 0;
+  const { deleteGmailSession } = sessionModule("test-secret", async (sql, params) => {
+    queryCalls += 1;
+    assert.equal(sql, "DELETE FROM oauth_sessions WHERE session_hash = $1");
+    assert.equal(params.length, 1);
+    assert.equal(params[0], createHash("sha256").update("opaque-session").digest("hex"));
+  });
+  await deleteGmailSession("opaque-session");
+  assert.equal(queryCalls, 1);
 });

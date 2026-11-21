@@ -23,7 +23,7 @@ export const COMPOSER_FONTS = [
 // Point-style sizes like a word processor ("" keeps the editor's normal size).
 const SIZES = ["", "10", "12", "14", "16", "18", "20", "24", "32", "48"] as const;
 /** Classes the editor needs so quotes and links look like what will be sent. */
-export const EDITOR_CONTENT_CLASS = "[&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_a]:text-[#0b57d0] [&_a]:underline [&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-[#c7c7c7] [&_blockquote]:pl-3";
+export const EDITOR_CONTENT_CLASS = "[&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_a]:text-mail-link [&_a]:underline [&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-mail-line-strong [&_blockquote]:pl-3";
 
 const PATHS = {
   undo: "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
@@ -49,7 +49,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"]/g, (char) => ({ "&":
 // onMouseDown is cancelled on every button so clicking it does not clear the text selection.
 function IconButton({ name, label, onClick }: { name: keyof typeof PATHS; label: string; onClick: () => void }) {
   return (
-    <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onClick} aria-label={label} title={label} className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-[#1f1f1f14]">
+    <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onClick} aria-label={label} title={label} className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-mail-muted-surface">
       <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><path d={PATHS[name]} /></svg>
     </button>
   );
@@ -59,10 +59,10 @@ function IconButton({ name, label, onClick }: { name: keyof typeof PATHS; label:
 function ColourButton({ label, glyph, value, onApply, onPick }: { label: string; glyph: string; value: string; onApply: () => void; onPick: (next: string) => void }) {
   return (
     <span className="flex shrink-0 items-center">
-      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onApply} aria-label={label} title={label} className="flex h-8 w-7 flex-col items-center justify-center rounded-l hover:bg-[#1f1f1f14]">
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onApply} aria-label={label} title={label} className="flex h-8 w-7 flex-col items-center justify-center rounded-l hover:bg-mail-muted-surface">
         <span className="text-sm font-bold leading-4">{glyph}</span><span className="h-1 w-4 rounded-sm" style={{ backgroundColor: value }} />
       </button>
-      <label className="flex h-8 w-4 cursor-pointer items-center justify-center rounded-r text-[10px] hover:bg-[#1f1f1f14]" title={`Choose ${label.toLowerCase()}`}>
+      <label className="flex h-8 w-4 cursor-pointer items-center justify-center rounded-r text-[10px] hover:bg-mail-muted-surface" title={`Choose ${label.toLowerCase()}`}>
         ▾<input type="color" value={value} aria-label={`Choose ${label.toLowerCase()}`} onChange={(event) => onPick(event.target.value)} className="sr-only" />
       </label>
     </span>
@@ -134,10 +134,10 @@ export function FormatToolbar({ editorRef, onChange, className = "" }: { editorR
     });
   };
 
-  const select = "h-8 cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-[#1f1f1f14]";
-  const divider = <span className="mx-1 h-5 w-px shrink-0 bg-[#c7c7c7]" aria-hidden="true" />;
+  const select = "h-8 cursor-pointer rounded bg-transparent px-1 text-sm outline-none hover:bg-mail-muted-surface";
+  const divider = <span className="mx-1 h-5 w-px shrink-0 bg-mail-line" aria-hidden="true" />;
   return (
-    <div className={`flex flex-wrap items-center gap-0.5 rounded-2xl bg-[#f0f4f9] px-2 py-1 text-[#444746] ${className}`} role="toolbar" aria-label="Formatting options">
+    <div className={`flex flex-wrap items-center gap-0.5 rounded-2xl bg-mail-muted-surface px-2 py-1 text-mail-secondary ${className}`} role="toolbar" aria-label="Formatting options">
       <IconButton name="undo" label="Undo (Ctrl+Z)" onClick={() => command("undo")} />
       <IconButton name="redo" label="Redo (Ctrl+Y)" onClick={() => command("redo")} />
       {divider}

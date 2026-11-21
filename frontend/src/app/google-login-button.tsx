@@ -72,8 +72,8 @@ export function GoogleLoginButton({ initialError }: { initialError?: string }) {
       <a href="/api/google/connect" onClick={login} aria-disabled={waiting} className="mt-7 inline-flex items-center gap-3 rounded-xl bg-[#5944d8] px-6 py-3 text-sm font-bold text-white transition hover:bg-[#4936c2] aria-disabled:opacity-60">
         {waiting ? "Waiting for Google…" : "Log in with Google"}
       </a>
-      {waiting && <div className="mt-3 text-sm text-[#858178]">Complete login in the Google window. <button type="button" className="underline" onClick={() => { cleanupRef.current?.(); setWaiting(false); }}>Cancel</button></div>}
-      {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {waiting && <div className="mt-3 text-sm text-mail-muted">Complete login in the Google window. <button type="button" className="underline" onClick={() => { cleanupRef.current?.(); setWaiting(false); }}>Cancel</button></div>}
+      {error && <p role="alert" className="mt-4 rounded-xl bg-mail-danger-tint p-3 text-sm text-mail-danger">{error}</p>}
     </div>
   );
 }

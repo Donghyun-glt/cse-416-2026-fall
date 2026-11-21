@@ -45,6 +45,16 @@ export async function getStoredPriorities(userId: number, gmailMessageIds: reado
   return stored;
 }
 
+export async function getUrgentMessageSummaries(userId: number) {
+  const result = await query<{ gmail_message_id: string; summary: string | null }>(`
+    SELECT p.gmail_message_id, COALESCE(NULLIF(i.analysis->>'summary', ''), i.analysis->>'reason') AS summary
+    FROM message_priorities p
+    LEFT JOIN message_insights i USING (user_id, gmail_message_id)
+    WHERE p.user_id = $1 AND p.priority = 'urgent'
+  `, [userId]);
+  return result.rows;
+}
+
 export async function recordPriority(input: {
   userId: number;
   gmailMessageId: string;
