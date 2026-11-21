@@ -195,3 +195,13 @@ test("session deletion targets the stored hash of the opaque session ID", async 
   await deleteGmailSession("opaque-session");
   assert.equal(queryCalls, 1);
 });
+
+test("stored tokens are bound to the session cookie, not only to the server secret", () => {
+  const { sealGmailTokens, openGmailTokens } = sessionModule("test-secret");
+  const sealed = sealGmailTokens({ refresh_token: "fake-refresh" }, "cookie-a");
+  assert.equal(openGmailTokens(sealed, "cookie-a").refresh_token, "fake-refresh");
+  assert.equal(openGmailTokens(sealed, "cookie-b"), undefined);
+  assert.equal(openGmailTokens(sealed), undefined); // The server secret alone is not enough.
+  // Sessions created before this change still open until they expire.
+  assert.equal(openGmailTokens(sealGmailTokens({ refresh_token: "old" }), "cookie-a").refresh_token, "old");
+});

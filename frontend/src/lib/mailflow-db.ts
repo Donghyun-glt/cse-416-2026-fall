@@ -1,6 +1,11 @@
 import type { Priority, PrioritySignals } from "./mail-priority";
 import { query, withTransaction } from "./postgres";
 import type { UserAbout } from "./user-about";
+import { lookupToken, open, openJson, seal, sealJson } from "./data-vault";
+
+// Content columns (drafts, AI readings, edited event details, About-you answers, task
+// text) are encrypted per user before they reach the database; see data-vault.ts.
+// What stays readable there is only what queries need: ids, labels, dates and statuses.
 
 export type PrioritySource = "automatic" | "manual";
 
@@ -44,16 +49,6 @@ export async function getStoredPriorities(userId: number, gmailMessageIds: reado
   `, [userId, [...gmailMessageIds]]);
   for (const row of result.rows) stored.set(row.gmail_message_id, row.priority);
   return stored;
-}
-
-export async function getUrgentMessageSummaries(userId: number) {
-  const result = await query<{ gmail_message_id: string; summary: string | null }>(`
-    SELECT p.gmail_message_id, COALESCE(NULLIF(i.analysis->>'summary', ''), i.analysis->>'reason') AS summary
-    FROM message_priorities p
-    LEFT JOIN message_insights i USING (user_id, gmail_message_id)
-    WHERE p.user_id = $1 AND p.priority = 'urgent'
-  `, [userId]);
-  return result.rows;
 }
 
 export async function recordPriority(input: {
@@ -146,9 +141,10 @@ export async function getStoredReplyDraft(input: {
     SET last_seen_at = NOW()
     WHERE user_id = $1 AND gmail_message_id = $2 AND tone = $3 AND length = $4 AND instructions = $5
     RETURNING draft, model, generated_at
-  `, [input.userId, input.gmailMessageId, input.tone, input.length, input.instructions]);
+  `, [input.userId, input.gmailMessageId, input.tone, input.length, lookupToken(input.userId, "reply_drafts.instructions", input.instructions)]);
   const row = result.rows[0];
-  return row ? { draft: row.draft, model: row.model, generatedAt: row.generated_at.toISOString() } : null;
+  const draft = row ? open(input.userId, `reply_drafts.draft:${input.gmailMessageId}`, row.draft) : null;
+  return row && draft !== null ? { draft, model: row.model, generatedAt: row.generated_at.toISOString() } : null;
 }
 
 export async function saveReplyDraft(input: {
@@ -168,7 +164,8 @@ export async function saveReplyDraft(input: {
       model = EXCLUDED.model,
       generated_at = NOW(),
       last_seen_at = NOW()
-  `, [input.userId, input.gmailMessageId, input.tone, input.length, input.instructions, input.draft, input.model]);
+  `, [input.userId, input.gmailMessageId, input.tone, input.length, lookupToken(input.userId, "reply_drafts.instructions", input.instructions),
+    seal(input.userId, `reply_drafts.draft:${input.gmailMessageId}`, input.draft), input.model]);
 }
 
 export type ReplyPanelState = {
@@ -185,7 +182,10 @@ export async function getReplyPanelState(userId: number, gmailMessageId: string)
     FROM reply_panel_states
     WHERE user_id = $1 AND gmail_message_id = $2
   `, [userId, gmailMessageId]);
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const draft = open(userId, `reply_panel_states.draft:${gmailMessageId}`, row.draft);
+  return draft === null ? null : { ...row, draft, instructions: open(userId, `reply_panel_states.instructions:${gmailMessageId}`, row.instructions) ?? "" };
 }
 
 export async function saveReplyPanelState(input: ReplyPanelState & { userId: number; gmailMessageId: string }) {
@@ -198,7 +198,8 @@ export async function saveReplyPanelState(input: ReplyPanelState & { userId: num
       length = EXCLUDED.length,
       instructions = EXCLUDED.instructions,
       updated_at = NOW()
-  `, [input.userId, input.gmailMessageId, input.draft, input.tone, input.length, input.instructions]);
+  `, [input.userId, input.gmailMessageId, seal(input.userId, `reply_panel_states.draft:${input.gmailMessageId}`, input.draft), input.tone, input.length,
+    seal(input.userId, `reply_panel_states.instructions:${input.gmailMessageId}`, input.instructions)]);
 }
 
 export async function deleteReplyPanelState(userId: number, gmailMessageId: string) {
@@ -210,7 +211,7 @@ export async function getMessageInsight(userId: number, gmailMessageId: string):
   const result = await query<{ analysis: unknown }>(`
     SELECT analysis FROM message_insights WHERE user_id = $1 AND gmail_message_id = $2
   `, [userId, gmailMessageId]);
-  return result.rows[0]?.analysis ?? null;
+  return openJson(userId, `message_insights.analysis:${gmailMessageId}`, result.rows[0]?.analysis);
 }
 
 /**
@@ -223,7 +224,7 @@ export async function saveMessageInsight(input: { userId: number; gmailMessageId
     VALUES ($1, $2, $3, $4::jsonb)
     ON CONFLICT (user_id, gmail_message_id) DO NOTHING
     RETURNING user_id
-  `, [input.userId, input.gmailMessageId, input.version, JSON.stringify(input.analysis)]);
+  `, [input.userId, input.gmailMessageId, input.version, sealJson(input.userId, `message_insights.analysis:${input.gmailMessageId}`, input.analysis)]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -237,7 +238,10 @@ export async function getCalendarEventStates(userId: number, gmailMessageId: str
     FROM calendar_event_states
     WHERE user_id = $1 AND gmail_message_id = $2
   `, [userId, gmailMessageId]);
-  return Object.fromEntries(result.rows.map((row) => [row.candidate_key, { status: row.status, details: row.details ?? {} }]));
+  return Object.fromEntries(result.rows.map((row) => [row.candidate_key, {
+    status: row.status,
+    details: (openJson(userId, `calendar_event_states.details:${gmailMessageId}:${row.candidate_key}`, row.details) ?? {}) as Record<string, unknown>,
+  }]));
 }
 
 export async function saveCalendarEventState(input: CalendarEventState & { userId: number; gmailMessageId: string; candidateKey: string }) {
@@ -248,7 +252,7 @@ export async function saveCalendarEventState(input: CalendarEventState & { userI
       status = EXCLUDED.status,
       details = EXCLUDED.details,
       updated_at = NOW()
-  `, [input.userId, input.gmailMessageId, input.candidateKey, input.status, JSON.stringify(input.details)]);
+  `, [input.userId, input.gmailMessageId, input.candidateKey, input.status, sealJson(input.userId, `calendar_event_states.details:${input.gmailMessageId}:${input.candidateKey}`, input.details)]);
 }
 
 /** The "About you" details the user entered in Settings, or null if they never saved any. */
@@ -257,7 +261,9 @@ export async function getUserAbout(userId: number): Promise<(UserAbout & { updat
     SELECT role, organization, department, interests, notes, updated_at FROM user_about WHERE user_id = $1
   `, [userId]);
   const row = result.rows[0];
-  return row ? { role: row.role, organization: row.organization, department: row.department, interests: row.interests, notes: row.notes, updatedAt: row.updated_at.toISOString() } : null;
+  if (!row) return null;
+  const field = (name: keyof UserAbout) => open(userId, `user_about.${name}`, row[name]) ?? "";
+  return { role: field("role") as UserAbout["role"], organization: field("organization"), department: field("department"), interests: field("interests"), notes: field("notes"), updatedAt: row.updated_at.toISOString() };
 }
 
 /**
@@ -276,7 +282,7 @@ export async function saveUserAbout(userId: number, about: UserAbout) {
       notes = EXCLUDED.notes,
       updated_at = NOW()
     RETURNING updated_at
-  `, [userId, about.role, about.organization, about.department, about.interests, about.notes]);
+  `, [userId, ...(["role", "organization", "department", "interests", "notes"] as const).map((name) => about[name] ? seal(userId, `user_about.${name}`, about[name]) : "")]);
   return result.rows[0].updated_at.toISOString();
 }
 
@@ -288,7 +294,7 @@ export type TodoStatus = "open" | "done" | "not_relevant";
 export type TodoItem = { gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; status: TodoStatus };
 type TodoRow = { gmail_message_id: string; task: string; due_date: string | null; reasons: string[]; confirm_audience: boolean; status: TodoStatus };
 const TODO_COLUMNS = "gmail_message_id, task, to_char(due_date, 'YYYY-MM-DD') AS due_date, reasons, confirm_audience, status";
-const todoItem = (row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: row.task, dueDate: row.due_date, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
+const todoItem = (userId: number, row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: open(userId, `todo_items.task:${row.gmail_message_id}`, row.task) ?? "", dueDate: row.due_date, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
 
 /** Lists a message on the Summary tab the first time it is analysed. Never changes an existing row. */
 export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean }) {
@@ -296,12 +302,12 @@ export async function createTodoItem(input: { userId: number; gmailMessageId: st
     INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience)
     VALUES ($1, $2, $3, $4::date, $5::text[], $6)
     ON CONFLICT (user_id, gmail_message_id) DO NOTHING
-  `, [input.userId, input.gmailMessageId, input.task, input.dueDate, input.reasons, input.confirmAudience]);
+  `, [input.userId, input.gmailMessageId, input.task ? seal(input.userId, `todo_items.task:${input.gmailMessageId}`, input.task) : "", input.dueDate, input.reasons, input.confirmAudience]);
 }
 
 export async function getTodoItem(userId: number, gmailMessageId: string): Promise<TodoItem | null> {
   const result = await query<TodoRow>(`SELECT ${TODO_COLUMNS} FROM todo_items WHERE user_id = $1 AND gmail_message_id = $2`, [userId, gmailMessageId]);
-  return result.rows[0] ? todoItem(result.rows[0]) : null;
+  return result.rows[0] ? todoItem(userId, result.rows[0]) : null;
 }
 
 /** Everything still open, plus what was finished in the last two weeks (so it can be undone). */
@@ -311,7 +317,7 @@ export async function listTodoItems(userId: number): Promise<TodoItem[]> {
     UNION ALL
     (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'done' AND updated_at > NOW() - INTERVAL '14 days' ORDER BY updated_at DESC LIMIT 20)
   `, [userId]);
-  return result.rows.map(todoItem);
+  return result.rows.map((row) => todoItem(userId, row));
 }
 
 /** The user's own choice: done, not relevant, or (re)opened. Opening a message with no row adds it by hand. */
@@ -350,10 +356,14 @@ export async function getAnalysedMessageIds(userId: number, gmailMessageIds: rea
 export async function getInsightSummaries(userId: number, gmailMessageIds: readonly string[]) {
   const summaries = new Map<string, string>();
   if (gmailMessageIds.length === 0) return summaries;
-  const result = await query<{ gmail_message_id: string; summary: string | null }>(`
-    SELECT gmail_message_id, COALESCE(NULLIF(analysis->>'summary', ''), analysis->>'reason') AS summary
-    FROM message_insights WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+  // The analysis is encrypted, so the summary is read out here rather than in SQL.
+  const result = await query<{ gmail_message_id: string; analysis: unknown }>(`
+    SELECT gmail_message_id, analysis FROM message_insights WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
   `, [userId, [...gmailMessageIds]]);
-  for (const row of result.rows) if (row.summary) summaries.set(row.gmail_message_id, row.summary);
+  for (const row of result.rows) {
+    const analysis = openJson(userId, `message_insights.analysis:${row.gmail_message_id}`, row.analysis) as { summary?: string; reason?: string } | null;
+    const summary = analysis?.summary || analysis?.reason;
+    if (summary) summaries.set(row.gmail_message_id, summary);
+  }
   return summaries;
 }

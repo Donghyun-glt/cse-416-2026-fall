@@ -122,6 +122,17 @@ PostgreSQL stores MailFlow-owned data:
 - Summary items (`todo_items`): messages that still need something from the user,
   decided separately from the Urgent / FYI / Low label (`src/lib/summary-todo.ts`)
 
+Content columns (reply drafts, AI readings, edited event details, About-you
+answers, task text) are encrypted by the application before they are written
+(`src/lib/data-vault.ts`: AES-256-GCM, one derived key per user, each value bound
+to its row and column). The key (`DATA_ENCRYPTION_KEY`) lives only in the server
+environment, so database access alone, including a developer's, shows ciphertext.
+Emails, message IDs, priority labels, dates and statuses stay readable because
+queries need them. OAuth tokens are additionally bound to the session cookie.
+`scripts/encrypt-existing-data.mjs` encrypts rows written before this change.
+This does not protect against someone who also holds the server key or can
+deploy server code.
+
 MailFlow does not copy full message bodies, attachments, passwords, or
 Gmail labels into PostgreSQL. Priority categories are not written back to Gmail.
 

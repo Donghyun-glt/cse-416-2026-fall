@@ -71,6 +71,13 @@ export default function PrivacyPolicy() {
           <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used to make Gmail and Google Calendar requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>
+          The content listed above (AI summaries and suggested events, reply drafts, your edits, your About-you answers
+          and task descriptions) is encrypted before it is stored, with a key that is kept outside the database and is
+          different for every account. People who can read the database, including MailFlow&apos;s developers, see only
+          ciphertext for it. Your email address, Gmail message IDs, priority labels, dates and done/not-done states are
+          stored unencrypted so the app can look them up.
+        </p>
+        <p>
           We do not store full message bodies or attachments. Messages are fetched from Gmail when you open the
           app and are not kept afterwards, apart from the AI results listed above. Calendar events are fetched when you open the Calendar screen and are not stored in our database.
         </p>
