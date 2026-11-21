@@ -59,44 +59,44 @@ test("All Emails preserves Gmail order while attaching database priorities", asy
   assert.deepEqual(body.messages.map((message) => message.html), ["", ""]);
 });
 
-test("Summary discovers new urgent messages and includes older stored urgent mail with its brief", async () => {
-  const urgent = [{ gmail_message_id: "archive", summary: "Submit the form by Friday." }];
-  for (const id of ["trash", "spam", "sent", "draft", "missing"]) urgent.push({ gmail_message_id: id, summary: null });
+test("Summary lists open to-do items whatever their priority, and reports recent mail still to analyse", async () => {
+  const item = (id, extra = {}) => ({ gmailMessageId: id, task: `Do ${id}`, dueDate: null, reasons: ["task"], confirmAudience: false, status: "open", ...extra });
+  const items = [item("fyi-task", { dueDate: "2026-12-04" }), item("urgent-task"), item("finished", { status: "done" }), item("trash"), item("spam"), item("missing")];
+  const labelById = { trash: "TRASH", spam: "SPAM" };
   const fetched = [];
-  const labelById = { fresh: "INBOX", trash: "TRASH", spam: "SPAM", sent: "SENT", draft: "DRAFT" };
   const gmail = {
     users: {
       getProfile: async () => ({ data: { emailAddress: "demo@example.com" } }),
       messages: {
         list: async (options) => {
           assert.equal(options.pageToken, undefined);
-          assert.equal(options.q, "-in:sent -in:drafts");
-          return { data: { messages: [{ id: "fresh" }, { id: "new-low" }], nextPageToken: "unscanned" } };
+          assert.match(options.q, /newer_than:14d/);
+          return { data: { messages: [{ id: "fresh" }, { id: "urgent-task" }], nextPageToken: "unscanned" } };
         },
         get: async ({ id, format }) => {
           assert.equal(format, "metadata");
           fetched.push(id);
           if (id === "missing") throw Object.assign(new Error("Missing"), { code: 404 });
-          return { data: { id, internalDate: id === "fresh" ? "200" : "100", labelIds: labelById[id] ? [labelById[id]] : [] } };
+          return { data: { id, internalDate: "100", labelIds: labelById[id] ? [labelById[id]] : ["INBOX"] } };
         },
       },
     },
   };
+  let labelled = [];
   const request = loadRoute(gmail, {
-    getStoredPriorities: async () => new Map([["new-low", "low"]]),
-    getUrgentMessageSummaries: async (userId) => { assert.equal(userId, 1); return urgent; },
-  }, async (messages) => {
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].id, "fresh");
-    urgent.push({ gmail_message_id: "fresh", summary: null });
-  });
+    getStoredPriorities: async (userId, ids) => new Map([["urgent-task", "urgent"], ["fyi-task", "fyi"]].filter(([id]) => ids.includes(id))),
+    getAnalysedMessageIds: async () => new Set(["urgent-task"]),
+    getInsightSummaries: async () => new Map([["fyi-task", "Submit the form by December 4."]]),
+    listTodoItems: async (userId) => { assert.equal(userId, 1); return items; },
+  }, async (messages) => { labelled = messages.map((message) => message.id); return new Map(); });
   const response = await request("mode=summary&unread=1&attachment=1&pageToken=unrelated");
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.deepEqual(body.messages.map(({ id, priority, summary }) => [id, priority, summary]), [
-    ["fresh", "urgent", undefined], ["archive", "urgent", "Submit the form by Friday."],
+  // A task in an FYI message is listed beside an urgent one; trashed, spam and deleted mail is not.
+  assert.deepEqual(body.messages.map(({ id, priority, summary, todo }) => [id, priority, summary, todo.status, todo.dueDate]), [
+    ["fyi-task", "fyi", "Submit the form by December 4.", "open", "2026-12-04"], ["urgent-task", "urgent", undefined, "open", null], ["finished", "fyi", undefined, "done", null],
   ]);
-  assert.equal(fetched.filter((id) => id === "fresh").length, 1);
-  assert.ok(!fetched.includes("new-low"));
+  assert.deepEqual([...labelled], ["fresh"]); // New mail still gets its provisional label.
+  assert.deepEqual(body.pending, ["fresh"]); // And is reported so the client can have it analysed.
   assert.equal(body.nextPageToken, undefined);
 });

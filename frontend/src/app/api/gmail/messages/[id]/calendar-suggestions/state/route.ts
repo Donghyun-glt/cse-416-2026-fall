@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { attachGmailSessionToUser, getGmailSessionWithUser } from "@/lib/gmail-session";
-import { saveCalendarEventState, upsertUser } from "@/lib/mailflow-db";
+import { getCalendarEventStates, getMessageInsight, resolveTodoReason, saveCalendarEventState, upsertUser } from "@/lib/mailflow-db";
+import { candidateKeys, type CalendarSuggestion } from "@/lib/calendar-suggestion";
 
 /**
  * PUT /api/gmail/messages/[id]/calendar-suggestions/state
@@ -45,6 +46,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       await attachGmailSessionToUser(sessionId, userId);
     }
     await saveCalendarEventState({ userId, gmailMessageId: id, candidateKey: body.key, status, details });
+    if (status !== "pending") {
+      // Once every suggested event of this message is added or dismissed, nothing about
+      // events is left to do, so that reason comes off the Summary item.
+      try {
+        const insight = await getMessageInsight(userId, id) as { candidates?: CalendarSuggestion[] } | null;
+        const states = await getCalendarEventStates(userId, id);
+        const keys = candidateKeys(insight?.candidates ?? []);
+        if (keys.every((key) => states[key] && states[key].status !== "pending")) await resolveTodoReason(userId, id, "event");
+      } catch { console.error("Summary to-do could not be updated after an event decision"); }
+    }
     return NextResponse.json({ saved: true });
   } catch (error) {
     console.error("Calendar event state could not be saved", error);

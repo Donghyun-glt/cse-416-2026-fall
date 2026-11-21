@@ -59,6 +59,15 @@ export default function PrivacyPolicy() {
             each suggestion (your edits, added or dismissed); and the reply draft you last left for a message. These are
             kept so they stay the same each time you open the message, on any device.
           </li>
+          <li>
+            <strong>About you (optional):</strong> the role, organization, major or department, topics and note you choose to
+            enter in Settings. Only you can add, change or clear them; MailFlow never fills them in or edits them. They are
+            sent to the AI provider together with a message when it is analysed, to judge whether the message concerns you.
+          </li>
+          <li>
+            <strong>Summary items:</strong> for messages that need something from you, a one-line description of the task, its
+            deadline if the email states one, and whether you marked it done.
+          </li>
           <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used to make Gmail and Google Calendar requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>

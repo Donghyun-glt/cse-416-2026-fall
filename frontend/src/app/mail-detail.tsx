@@ -7,6 +7,9 @@ import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
 import { CalendarSuggestions } from "./calendar-suggestions";
 import { COMPOSER_FONTS, EDITOR_CONTENT_CLASS, FormatToolbar } from "./format-toolbar";
 
+/** A message's place on the Summary tab, decided separately from its priority label. */
+export type MailTodo = { task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; status: "open" | "done" | "not_relevant" };
+
 export type Mail = {
   id: string;
   subject: string;
@@ -18,6 +21,8 @@ export type Mail = {
   snippet: string;
   /** Cached MailFlow analysis shown in Summary when available. */
   summary?: string;
+  /** Present on Summary rows only. */
+  todo?: MailTodo;
   html: string;
   unread: boolean;
   starred: boolean;
@@ -859,6 +864,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
     loadSuggestion({ tone: aiTone, length: aiLength, regenerate: true, instructions, currentDraft: currentDraft || undefined });
   };
 
+  // A sent reply settles the "reply needed" reason on the Summary tab. Best effort.
+  const markReplied = () => {
+    void fetch(`/api/gmail/messages/${encodeURIComponent(message.id)}/todo`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resolved: "reply" }) }).catch(() => null);
+  };
+
   const sendSuggestion = async () => {
     const text = suggestion.draft.trim();
     if (!text || sendingSuggestion) return;
@@ -872,6 +882,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Reply could not be sent.");
       setSuggestion((current) => ({ ...current, status: "sent" }));
+      markReplied();
       setToast("Reply sent");
     } catch (sendError) {
       setSuggestion((current) => ({ ...current, message: sendError instanceof Error ? sendError.message : "Reply could not be sent." }));
@@ -915,6 +926,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       setFiles([]);
       setForwardTo("");
       setToast("Message sent");
+      if (composeMode !== "forward") markReplied();
     } catch (sendError) {
       // The text is still unsent, so keep it protected by autosave.
       dirtyRef.current = true;

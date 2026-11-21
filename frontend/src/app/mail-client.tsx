@@ -7,12 +7,12 @@ import { AccountMenu } from "./account-menu";
 import { GoogleLoginButton } from "./google-login-button";
 import { GoogleCalendar } from "./google-calendar";
 import { DailyBriefing } from "./daily-briefing";
-import { UrgentSummary } from "./urgent-summary";
+import { SummaryTodoList } from "./summary-todo-list";
 import { ComposeWindow, type ComposeDraft } from "./compose-window";
 import { comparePriority, type Priority } from "@/lib/mail-priority";
 import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "./mail-detail";
 
-type MailResponse = { connected?: boolean; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
+type MailResponse = { connected?: boolean; pending?: string[]; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
 type UserProfile = { name: string; email: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
 // One entry per screen the browser's Back button should return to.
@@ -100,6 +100,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   loginError?: string;
 }) {
   const [theme, setTheme] = useState(initialTheme);
+  const [summaryPending, setSummaryPending] = useState<string[]>([]);
   const [messages, setMessages] = useState<Mail[]>([]);
   const [connected, setConnected] = useState(initialConnected);
   const [loading, setLoading] = useState(initialConnected);
@@ -165,6 +166,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
       }
       if (!response.ok) throw new Error(data.error ?? "Could not load messages.");
       const nextMessages = data.messages ?? [];
+      if (targetView === "summary") setSummaryPending(data.pending ?? []);
       setConnected(true);
       setMessages(nextMessages);
       if (showLoading) {
@@ -609,7 +611,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
     }
   };
 
-  const displayedMessages = view === "summary" ? messages.filter((message) => message.priority === "urgent") : messages;
+  const displayedMessages = messages;
   const singleList = view === "briefing" || view === "summary";
   const selectedPosition = {
     index: selectedMail ? displayedMessages.findIndex((message) => message.id === selectedMail.id) : -1,
@@ -692,11 +694,11 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
           />
         ) : (
           <>
-        <header className="border-b border-mail-line bg-mail-surface px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "summary" ? "Summary" : view === "calendar" ? "Calendar" : view === "starred" ? "Starred" : view === "sent" ? "Sent" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : view === "inbox" ? "Inbox" : view === "spam" ? "Spam" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-mail-muted">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}{view === "summary" && <p className="mt-1 text-sm text-mail-muted">A quick look at the emails that need your attention.</p>}</div></header>
+        <header className="border-b border-mail-line bg-mail-surface px-6 py-5 md:px-9"><div className="mx-auto max-w-[1200px]"><h1 className="text-2xl font-extrabold tracking-[-0.03em]">{view === "briefing" ? `${greeting()}${profile.name ? `, ${profile.name}` : ""}` : view === "summary" ? "Summary" : view === "calendar" ? "Calendar" : view === "starred" ? "Starred" : view === "sent" ? "Sent" : view === "drafts" ? "Drafts" : view === "trash" ? "Trash" : view === "inbox" ? "Inbox" : view === "spam" ? "Spam" : "All Emails"}</h1>{view === "briefing" && <p className="mt-1 text-sm text-mail-muted">{fullDate} · You have {messages.length} new email{messages.length === 1 ? "" : "s"} today</p>}{view === "summary" && <p className="mt-1 text-sm text-mail-muted">What still needs something from you.</p>}</div></header>
 
         <div className="mx-auto max-w-[1200px] space-y-5 px-5 py-6 md:px-9">
           {view === "calendar" ? <GoogleCalendar /> : view === "summary" ? (
-            <UrgentSummary messages={displayedMessages} loading={loading} error={error} onOpen={openMessage} onRetry={() => void loadMessages("summary", true)} />
+            <SummaryTodoList messages={displayedMessages} pending={summaryPending} loading={loading} error={error} onOpen={openMessage} onRefresh={() => void loadMessages("summary")} />
           ) : <>
           {view === "briefing" && <TodayCard />}
           <section>

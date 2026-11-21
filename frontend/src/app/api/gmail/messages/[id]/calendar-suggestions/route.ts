@@ -6,8 +6,9 @@ import { attachGmailSessionToUser, getGmailSessionWithUser } from "@/lib/gmail-s
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { emailBodyToText } from "@/lib/reply-draft";
 import { generateText, GeminiError, geminiModel } from "@/lib/gemini";
+import { decideTodo, profileForPrompt } from "@/lib/summary-todo";
 import { ANALYSIS_VERSION, analysisPrompt, analysisSchema, validateMailAnalysis, type AnalysisContext } from "@/lib/mail-analysis";
-import { getCalendarEventStates, getMessageInsight, recordPriority, saveMessageInsight, upsertUser, type CalendarEventState } from "@/lib/mailflow-db";
+import { createTodoItem, getCalendarEventStates, getMessageInsight, getTodoItem, getUserAbout, recordPriority, saveMessageInsight, upsertUser, type CalendarEventState, type TodoItem } from "@/lib/mailflow-db";
 
 // A message is analysed once. The validated result (summary, suggested events, review
 // notes) is stored per user + message and returned as-is afterwards, so its category
@@ -44,8 +45,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const storedResponse = async (userId: number) => {
     const stored = await getMessageInsight(userId, id) as { candidates?: unknown[] } | null;
     if (!stored) return null;
-    const eventStates = await getCalendarEventStates(userId, id);
-    return NextResponse.json({ analysis: stored, candidates: stored.candidates ?? [], eventStates, stored: true, prioritySaved: false, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
+    const [eventStates, todo] = await Promise.all([getCalendarEventStates(userId, id), getTodoItem(userId, id)]);
+    return NextResponse.json({ analysis: stored, candidates: stored.candidates ?? [], eventStates, todo, stored: true, prioritySaved: false, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
   };
   if (session.userId !== null) {
     try {
@@ -73,8 +74,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const profile = (await gmail.users.getProfile({ userId: "me" })).data;
     const recipient = profile.emailAddress ?? "";
     const sentAt = Number.isFinite(Date.parse(mail.date)) ? mail.date : new Date(Number(original.internalDate)).toISOString();
-    const context: AnalysisContext = { sentAt, now: new Date().toISOString(), recipient, from: mail.from, to: mail.to, cc: mail.cc, timeZone, superseded, truncated: fullSource.length > source.length, automated: Boolean(mail.unsubscribeUrl) || /no-?reply|notification/i.test(mail.from) };
-    const key = createHash("sha256").update(JSON.stringify([ANALYSIS_VERSION, geminiModel(), recipient, id, source, sentAt, timeZone, superseded])).digest("hex");
+    // The user's own Settings entries, read-only here: analysis may use them but never writes them.
+    const about = session.userId === null ? null : await getUserAbout(session.userId).catch(() => null);
+    const recipientProfile = profileForPrompt(about);
+    const context: AnalysisContext = { recipientProfile, sentAt, now: new Date().toISOString(), recipient, from: mail.from, to: mail.to, cc: mail.cc, timeZone, superseded, truncated: fullSource.length > source.length, automated: Boolean(mail.unsubscribeUrl) || /no-?reply|notification/i.test(mail.from) };
+    const key = createHash("sha256").update(JSON.stringify([ANALYSIS_VERSION, geminiModel(), recipient, id, source, sentAt, timeZone, superseded, recipientProfile])).digest("hex");
     const raw = await analyze(source, context, key);
     const analysis = validateMailAnalysis(raw, source, context);
     // Classification failure/storage failure must not turn into a false "no event".
@@ -82,6 +86,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let priority = analysis.priority;
     let prioritySaved = false;
     const eventStates: Record<string, CalendarEventState> = {};
+    let todo: TodoItem | null = null;
     try {
       const userId = session.userId ?? await upsertUser(recipient);
       if (session.userId === null && sessionId) await attachGmailSessionToUser(sessionId, userId);
@@ -93,6 +98,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const response = await storedResponse(userId);
         if (response) return response;
       }
+      // Summary tab: a separate decision from the priority recorded below. Neither reads the other.
+      if (!superseded) {
+        try {
+          const decision = decideTodo((raw as { todo?: unknown }).todo, { source, sentAt, now: new Date(context.now), timeZone, automated: context.automated, about, events: analysis.candidates });
+          if (decision) await createTodoItem({ userId, gmailMessageId: id, ...decision });
+          todo = await getTodoItem(userId, id);
+        } catch { console.error("Summary to-do could not be stored"); }
+      }
       const storedReason = analysis.priority === "urgent" ? "Full-body analysis found a personal action with a near-term date or active blocker"
         : analysis.importance === "high" ? "Full-body analysis found a consequential personal action or important information"
         : analysis.importance === "low" ? "Full-body analysis found optional or unrelated content without a personal obligation"
@@ -100,7 +113,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       priority = await recordPriority({ userId, gmailMessageId: id, priority: analysis.priority, source: "automatic", reason: storedReason, signals: analysis.signals }) ?? analysis.priority;
       prioritySaved = true;
     } catch { console.error("Content analysis priority could not be saved"); }
-    return NextResponse.json({ analysis, candidates: analysis.candidates, eventStates, priority, prioritySaved, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ analysis, candidates: analysis.candidates, eventStates, todo, priority, prioritySaved, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof GeminiError) return NextResponse.json({ error: error.code }, { status: error.code === "rate_limited" ? 429 : 503 });
     console.error("Email content analysis failed");

@@ -132,6 +132,18 @@ function Candidate({ candidate, candidateKey, messageId, initial }: { candidate:
 export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { messageId: string; onAnalyzedPriority?: (priority: Priority) => void }) {
   const [candidates, setCandidates] = useState<CalendarSuggestion[]>([]);
   const [eventStates, setEventStates] = useState<Record<string, EventState>>({});
+  // This message's place on the Summary tab (null = not listed). Separate from its priority.
+  const [todo, setTodo] = useState<{ status: "open" | "done" | "not_relevant"; task: string } | null>(null);
+  const [todoBusy, setTodoBusy] = useState(false);
+  const markTodo = async (status: "open" | "done") => {
+    if (todoBusy) return;
+    setTodoBusy(true);
+    try {
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}/todo`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const data = await response.json().catch(() => null) as { todo?: typeof todo } | null;
+      if (response.ok) setTodo(data?.todo ?? null);
+    } finally { setTodoBusy(false); }
+  };
   const [analysis, setAnalysis] = useState<MailAnalysis | null>(null);
   const [status, setStatus] = useState("Reading this email for important information…");
   const [retry, setRetry] = useState(0);
@@ -147,6 +159,7 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
         if (controller.signal.aborted) return;
         setAnalysis(data.analysis ?? null);
         setEventStates(data.eventStates ?? {});
+        setTodo(data.todo ?? null);
         setCandidates(data.candidates ?? []);
         if (data.prioritySaved && ["urgent", "fyi", "low"].includes(data.priority)) onAnalyzedPriority?.(data.priority);
         setStatus(data.note ?? (data.candidates?.length ? "" : "No event found in this email."));
@@ -164,6 +177,10 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
       <p className="text-sm leading-6">{analysis.reason}</p>
       {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-mail-warning-tint p-3 text-xs text-mail-warning">{note}</p>)}
     </>}
+    {analysis && <div className="flex items-center justify-between gap-3 border-t border-mail-line pt-3 text-xs">
+      <span className="min-w-0 text-mail-secondary">{todo?.status === "open" ? <>In Summary{todo.task ? <>: <span className="font-semibold text-foreground">{todo.task}</span></> : ""}</> : todo?.status === "done" ? "Marked done in Summary" : "Not in Summary"}</span>
+      <button type="button" disabled={todoBusy} onClick={() => void markTodo(todo?.status === "open" ? "done" : "open")} className="shrink-0 rounded-lg border border-mail-line px-2.5 py-1 font-semibold text-mail-secondary hover:bg-mail-muted-surface disabled:opacity-50">{todo?.status === "open" ? "Mark done" : "Add to Summary"}</button>
+    </div>}
     <div className="border-t border-mail-line pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-mail-accent">Suggested events</h3>{status && <p role="status" className="text-xs text-mail-secondary">{status}</p>}</div>
     {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-mail-accent underline">Retry analysis</button>}
     {candidates.map((candidate, index) => <Candidate key={keys[index]} candidate={candidate} candidateKey={keys[index]} messageId={messageId} initial={eventStates[keys[index]]} />)}

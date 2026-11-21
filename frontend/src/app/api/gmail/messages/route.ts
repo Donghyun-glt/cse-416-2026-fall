@@ -4,7 +4,7 @@ import { createGoogleOAuthClient } from "@/lib/google";
 import { attachGmailSessionToUser, getGmailSessionWithUser } from "@/lib/gmail-session";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { getOrAssignPriorities } from "@/lib/gmail-priority";
-import { getStoredPriorities, getUrgentMessageSummaries, upsertUser } from "@/lib/mailflow-db";
+import { getAnalysedMessageIds, getInsightSummaries, getStoredPriorities, listTodoItems, upsertUser } from "@/lib/mailflow-db";
 import { comparePriority } from "@/lib/mail-priority";
 
 // Lists only need what a row shows. Bodies and attachments are fetched by
@@ -39,25 +39,38 @@ async function getSummaryMetadata(gmail: gmail_v1.Gmail, ids: string[]) {
   return messages;
 }
 
-async function loadSummary(gmail: gmail_v1.Gmail, userId: number) {
-  // Discover newly arrived mail even when Summary is the only view open.
-  // Older messages remain eligible through their stored MailFlow priority.
-  const { data } = await gmail.users.messages.list({ userId: "me", maxResults: SUMMARY_DISCOVERY_SIZE, q: "-in:sent -in:drafts" });
-  const recentIds = (data.messages ?? []).flatMap(({ id }) => id ? [id] : []);
-  const stored = await getStoredPriorities(userId, recentIds);
-  const recent = await getSummaryMetadata(gmail, recentIds.filter((id) => !stored.has(id)));
-  await getOrAssignPriorities([...recent.values()].filter(isReceivedMessage), userId);
+const SUMMARY_PENDING_LIMIT = 20;
 
-  const urgent = await getUrgentMessageSummaries(userId);
-  const metadata = await getSummaryMetadata(gmail, urgent.flatMap(({ gmail_message_id: id }) => recent.has(id) ? [] : [id]));
-  return urgent.flatMap(({ gmail_message_id: id, summary }) => {
-    const message = recent.get(id) ?? metadata.get(id);
-    return message && isReceivedMessage(message) ? [{ message, summary }] : [];
-  }).sort((a, b) => Number(b.message.internalDate ?? 0) - Number(a.message.internalDate ?? 0))
-    .map(({ message, summary }) => ({
-      ...parseGmailMessage(message), html: "", priority: "urgent", partial: true,
-      summary: summary?.trim() || undefined,
-    }));
+/**
+ * Summary tab: the messages that still need something from the user (todo_items),
+ * whatever their priority label, plus the ids of recent mail that has not been
+ * analysed yet so the client can have it analysed even when Summary is the only
+ * view the user opens.
+ */
+async function loadSummary(gmail: gmail_v1.Gmail, userId: number) {
+  const { data } = await gmail.users.messages.list({ userId: "me", maxResults: SUMMARY_DISCOVERY_SIZE, q: "newer_than:14d -in:sent -in:drafts -in:spam -in:trash" });
+  const recentIds = (data.messages ?? []).flatMap(({ id }) => id ? [id] : []);
+  const [storedPriorities, analysed, items] = await Promise.all([getStoredPriorities(userId, recentIds), getAnalysedMessageIds(userId, recentIds), listTodoItems(userId)]);
+  // New mail still gets its provisional priority label, as in every other list.
+  const unlabelled = await getSummaryMetadata(gmail, recentIds.filter((id) => !storedPriorities.has(id)));
+  await getOrAssignPriorities([...unlabelled.values()].filter(isReceivedMessage), userId);
+
+  const itemIds = items.map((item) => item.gmailMessageId);
+  const [metadata, priorities, summaries] = await Promise.all([
+    getSummaryMetadata(gmail, itemIds.filter((id) => !unlabelled.has(id))), getStoredPriorities(userId, itemIds), getInsightSummaries(userId, itemIds),
+  ]);
+  const messages = items.flatMap((item) => {
+    const message = unlabelled.get(item.gmailMessageId) ?? metadata.get(item.gmailMessageId);
+    // Deleted, trashed or spam-filed mail needs nothing more from the user.
+    if (!message || !isReceivedMessage(message)) return [];
+    return [{
+      ...parseGmailMessage(message), html: "", partial: true,
+      priority: priorities.get(item.gmailMessageId) ?? "fyi",
+      summary: summaries.get(item.gmailMessageId),
+      todo: { task: item.task, dueDate: item.dueDate, reasons: item.reasons, confirmAudience: item.confirmAudience, status: item.status },
+    }];
+  });
+  return { messages, pending: recentIds.filter((id) => !analysed.has(id)).slice(0, SUMMARY_PENDING_LIMIT) };
 }
 
 export async function GET(request: NextRequest) {
@@ -99,7 +112,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (requestedMode === "summary") {
-      return NextResponse.json({ connected: true, messages: await loadSummary(gmail, userId) });
+      return NextResponse.json({ connected: true, ...await loadSummary(gmail, userId) });
     }
 
     const messageIds: string[] = [];

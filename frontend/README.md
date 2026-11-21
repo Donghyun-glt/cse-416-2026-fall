@@ -116,6 +116,11 @@ PostgreSQL stores MailFlow-owned data:
   calendar events (with the short email quotes that support them) and review notes
 - Per suggested event: the user's last edits and whether it was added or dismissed
 - Per message: the reply panel as the user last left it (draft, tone, length, request)
+- Optional "About you" details the user types in Settings (role, organization,
+  major/department, interests, note). Written only by the Settings save route;
+  no AI step may change them. They are passed read-only to message analysis.
+- Summary items (`todo_items`): messages that still need something from the user,
+  decided separately from the Urgent / FYI / Low label (`src/lib/summary-todo.ts`)
 
 MailFlow does not copy full message bodies, attachments, passwords, or
 Gmail labels into PostgreSQL. Priority categories are not written back to Gmail.

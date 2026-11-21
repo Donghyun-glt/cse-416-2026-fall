@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+const loadTodo = () => { const e = {}; require('node:vm').runInNewContext(require('typescript').transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../src/lib/summary-todo.ts'), 'utf8'), { compilerOptions: { module: 1, target: 9 } }).outputText, { exports: e, require: (name) => require(name === './calendar-suggestion' ? '../src/lib/calendar-suggestion.ts' : name === './user-about' ? '../src/lib/user-about.ts' : name) }); return e; };
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const ts = require('typescript');
@@ -6,7 +7,7 @@ const vm = require('node:vm');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const exportsObject = {};
-vm.runInNewContext(ts.transpileModule(readFileSync(resolve(__dirname, '../src/lib/mail-analysis.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: exportsObject, require: (name) => name === './calendar-suggestion' ? require('../src/lib/calendar-suggestion.ts') : require(name) });
+vm.runInNewContext(ts.transpileModule(readFileSync(resolve(__dirname, '../src/lib/mail-analysis.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: exportsObject, require: (name) => name === './calendar-suggestion' ? require('../src/lib/calendar-suggestion.ts') : name === './summary-todo' ? loadTodo() : require(name) });
 const { validateMailAnalysis } = exportsObject;
 const context = { sentAt: '2026-11-12T08:00:00Z', now: '2026-11-14T00:00:00Z', timeZone: 'Asia/Seoul', recipient: 'me@example.com', from: 'noreply@example.com', to: 'me@example.com', cc: '', automated: true };
 const source = 'Your license renewal is due on 2026/11/15. Submit the form to retain access. Bring your photo ID. Failure to renew suspends your access.';

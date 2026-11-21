@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { GOOGLE_REAUTH_ATTEMPT_KEY } from "@/lib/google-login";
 import type { MailTheme } from "@/lib/mail-theme";
 import { initials } from "./mail-detail";
+import { AboutYouForm } from "./about-you-form";
 
 const icons = {
   chevrons: <path d="m8 9 4-4 4 4m-8 6 4 4 4-4" />,
@@ -43,6 +44,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
   onThemeChange: (theme: MailTheme) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
   const menuId = useId();
@@ -103,7 +105,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
 
         {open && (
           <div id={menuId} className="absolute left-0 top-full z-40 mt-2 w-[min(17.5rem,calc(100vw-2rem))] space-y-2 rounded-2xl border border-mail-line bg-mail-surface p-2 text-foreground shadow-[0_16px_44px_rgba(23,17,51,.2)] lg:bottom-full lg:top-auto lg:mb-2 lg:mt-0">
-            <button type="button" onClick={() => { settings.current?.showModal(); setOpen(false); }}
+            <button type="button" onClick={() => { setSettingsOpen(true); settings.current?.showModal(); setOpen(false); }}
               className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold transition-colors hover:bg-mail-muted-surface">
               <span className="grid size-8 place-items-center rounded-lg bg-mail-accent-tint text-mail-accent"><AccountIcon name="settings" /></span>
               Settings
@@ -121,7 +123,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
         )}
       </div>
 
-      <dialog ref={settings} aria-labelledby={settingsTitleId} onClose={() => trigger.current?.focus()}
+      <dialog ref={settings} aria-labelledby={settingsTitleId} onClose={() => { setSettingsOpen(false); trigger.current?.focus(); }}
         className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-3xl border border-mail-line bg-mail-surface p-6 text-foreground shadow-2xl backdrop:bg-black/50">
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id={settingsTitleId} className="text-xl font-extrabold tracking-tight">Settings</h2>
@@ -132,6 +134,8 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
           <div className="min-w-0"><p className="break-words text-sm font-bold">{displayName}</p><p className="mt-1 break-all text-xs text-mail-muted">{email}</p></div>
         </div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
+        {/* Mounted while Settings is open, so it always shows what is stored now. */}
+        {settingsOpen && <AboutYouForm />}
       </dialog>
     </>
   );

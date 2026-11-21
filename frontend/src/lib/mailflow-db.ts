@@ -1,5 +1,6 @@
 import type { Priority, PrioritySignals } from "./mail-priority";
 import { query, withTransaction } from "./postgres";
+import type { UserAbout } from "./user-about";
 
 export type PrioritySource = "automatic" | "manual";
 
@@ -248,4 +249,111 @@ export async function saveCalendarEventState(input: CalendarEventState & { userI
       details = EXCLUDED.details,
       updated_at = NOW()
   `, [input.userId, input.gmailMessageId, input.candidateKey, input.status, JSON.stringify(input.details)]);
+}
+
+/** The "About you" details the user entered in Settings, or null if they never saved any. */
+export async function getUserAbout(userId: number): Promise<(UserAbout & { updatedAt: string }) | null> {
+  const result = await query<UserAbout & { updated_at: Date }>(`
+    SELECT role, organization, department, interests, notes, updated_at FROM user_about WHERE user_id = $1
+  `, [userId]);
+  const row = result.rows[0];
+  return row ? { role: row.role, organization: row.organization, department: row.department, interests: row.interests, notes: row.notes, updatedAt: row.updated_at.toISOString() } : null;
+}
+
+/**
+ * Stores the details exactly as the user submitted them. Call this only from the
+ * Settings save route: nothing an AI produced may ever be written here.
+ */
+export async function saveUserAbout(userId: number, about: UserAbout) {
+  const result = await query<{ updated_at: Date }>(`
+    INSERT INTO user_about (user_id, role, organization, department, interests, notes, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    ON CONFLICT (user_id) DO UPDATE SET
+      role = EXCLUDED.role,
+      organization = EXCLUDED.organization,
+      department = EXCLUDED.department,
+      interests = EXCLUDED.interests,
+      notes = EXCLUDED.notes,
+      updated_at = NOW()
+    RETURNING updated_at
+  `, [userId, about.role, about.organization, about.department, about.interests, about.notes]);
+  return result.rows[0].updated_at.toISOString();
+}
+
+export async function deleteUserAbout(userId: number) {
+  await query("DELETE FROM user_about WHERE user_id = $1", [userId]);
+}
+
+export type TodoStatus = "open" | "done" | "not_relevant";
+export type TodoItem = { gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; status: TodoStatus };
+type TodoRow = { gmail_message_id: string; task: string; due_date: string | null; reasons: string[]; confirm_audience: boolean; status: TodoStatus };
+const TODO_COLUMNS = "gmail_message_id, task, to_char(due_date, 'YYYY-MM-DD') AS due_date, reasons, confirm_audience, status";
+const todoItem = (row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: row.task, dueDate: row.due_date, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
+
+/** Lists a message on the Summary tab the first time it is analysed. Never changes an existing row. */
+export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean }) {
+  await query(`
+    INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience)
+    VALUES ($1, $2, $3, $4::date, $5::text[], $6)
+    ON CONFLICT (user_id, gmail_message_id) DO NOTHING
+  `, [input.userId, input.gmailMessageId, input.task, input.dueDate, input.reasons, input.confirmAudience]);
+}
+
+export async function getTodoItem(userId: number, gmailMessageId: string): Promise<TodoItem | null> {
+  const result = await query<TodoRow>(`SELECT ${TODO_COLUMNS} FROM todo_items WHERE user_id = $1 AND gmail_message_id = $2`, [userId, gmailMessageId]);
+  return result.rows[0] ? todoItem(result.rows[0]) : null;
+}
+
+/** Everything still open, plus what was finished in the last two weeks (so it can be undone). */
+export async function listTodoItems(userId: number): Promise<TodoItem[]> {
+  const result = await query<TodoRow>(`
+    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'open')
+    UNION ALL
+    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'done' AND updated_at > NOW() - INTERVAL '14 days' ORDER BY updated_at DESC LIMIT 20)
+  `, [userId]);
+  return result.rows.map(todoItem);
+}
+
+/** The user's own choice: done, not relevant, or (re)opened. Opening a message with no row adds it by hand. */
+export async function setTodoStatus(userId: number, gmailMessageId: string, status: TodoStatus) {
+  await query(`
+    INSERT INTO todo_items (user_id, gmail_message_id, reasons, status)
+    VALUES ($1, $2, ARRAY['manual'], $3)
+    ON CONFLICT (user_id, gmail_message_id) DO UPDATE SET
+      status = EXCLUDED.status,
+      reasons = CASE WHEN EXCLUDED.status = 'open' AND cardinality(todo_items.reasons) = 0 THEN ARRAY['manual'] ELSE todo_items.reasons END,
+      updated_at = NOW()
+  `, [userId, gmailMessageId, status]);
+}
+
+/** One reason is dealt with (the reply was sent, the event was decided). The item is done when none is left. */
+export async function resolveTodoReason(userId: number, gmailMessageId: string, reason: string) {
+  await query(`
+    UPDATE todo_items SET
+      reasons = array_remove(reasons, $3),
+      status = CASE WHEN cardinality(array_remove(reasons, $3)) = 0 THEN 'done' ELSE status END,
+      updated_at = NOW()
+    WHERE user_id = $1 AND gmail_message_id = $2 AND status = 'open' AND $3 = ANY(reasons)
+  `, [userId, gmailMessageId, reason]);
+}
+
+/** Which of these messages have already been analysed. */
+export async function getAnalysedMessageIds(userId: number, gmailMessageIds: readonly string[]) {
+  if (gmailMessageIds.length === 0) return new Set<string>();
+  const result = await query<{ gmail_message_id: string }>(`
+    SELECT gmail_message_id FROM message_insights WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+  `, [userId, [...gmailMessageIds]]);
+  return new Set(result.rows.map((row) => row.gmail_message_id));
+}
+
+/** AI summaries for the Summary rows that have one. */
+export async function getInsightSummaries(userId: number, gmailMessageIds: readonly string[]) {
+  const summaries = new Map<string, string>();
+  if (gmailMessageIds.length === 0) return summaries;
+  const result = await query<{ gmail_message_id: string; summary: string | null }>(`
+    SELECT gmail_message_id, COALESCE(NULLIF(analysis->>'summary', ''), analysis->>'reason') AS summary
+    FROM message_insights WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+  `, [userId, [...gmailMessageIds]]);
+  for (const row of result.rows) if (row.summary) summaries.set(row.gmail_message_id, row.summary);
+  return summaries;
 }

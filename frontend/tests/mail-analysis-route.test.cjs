@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+const loadTodo = () => { const e = {}; require('node:vm').runInNewContext(require('typescript').transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../src/lib/summary-todo.ts'), 'utf8'), { compilerOptions: { module: 1, target: 9 } }).outputText, { exports: e, require: (name) => require(name === './calendar-suggestion' ? '../src/lib/calendar-suggestion.ts' : name === './user-about' ? '../src/lib/user-about.ts' : name) }); return e; };
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const ts = require('typescript');
@@ -11,11 +12,11 @@ function load(file, imports) {
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: exported, require: (name) => imports[name] ?? require(name), console, AbortSignal });
  return exported;
 }
-function handler({ signedOut = false, superseded = false, db = { insights: new Map(), states: new Map() } } = {}) {
+function handler({ signedOut = false, superseded = false, db = { insights: new Map(), states: new Map(), todos: new Map() } } = {}) {
  let generations = 0, saved, gmailReads = 0;
  const source = 'Your account is locked. Reset your access now.';
  const raw = { relevance: 'recipient_action', stakes: 'high', reason: 'Access is blocked and requires action.', reasonEvidence: 'Your account is locked.', activeBlocker: true, blockerEvidence: 'Your account is locked.', keyPoints: [{ kind: 'action', text: 'Reset your access now.', evidence: 'Reset your access now.', owner: 'recipient', importance: 'critical', date: null, dateEvidence: '' }], candidates: [] };
- const analysis = load('lib/mail-analysis.ts', { './calendar-suggestion': require('../src/lib/calendar-suggestion.ts') });
+ const analysis = load('lib/mail-analysis.ts', { './calendar-suggestion': require('../src/lib/calendar-suggestion.ts'), './summary-todo': loadTodo() });
  const route = load('app/api/gmail/messages/[id]/calendar-suggestions/route.ts', {
   '@/lib/google': { createGoogleOAuthClient: () => ({ setCredentials() {} }) },
   '@/lib/gmail-session': { getGmailSessionWithUser: async () => signedOut ? undefined : { tokens: {}, userId: 1 }, attachGmailSessionToUser: async () => {} },
@@ -24,7 +25,9 @@ function handler({ signedOut = false, superseded = false, db = { insights: new M
   '@/lib/reply-draft': { emailBodyToText: (body) => body },
   '@/lib/gemini': { generateText: async () => { generations++; return JSON.stringify(raw); }, GeminiError: class extends Error {}, geminiModel: () => 'test' },
   '@/lib/mail-analysis': analysis,
+  '@/lib/summary-todo': loadTodo(),
   '@/lib/mailflow-db': {
+   getUserAbout: async () => null, createTodoItem: async (item) => { db.todos.set(item.gmailMessageId, { ...item, status: 'open' }); }, getTodoItem: async (user, id) => db.todos.get(id) ?? null,
    upsertUser: async () => 1, recordPriority: async (input) => { saved = input; return 'low'; },
    getMessageInsight: async (user, id) => db.insights.get(`${user}:${id}`) ?? null,
    saveMessageInsight: async ({ userId, gmailMessageId, analysis: value }) => { const key = `${userId}:${gmailMessageId}`; if (db.insights.has(key)) return false; db.insights.set(key, JSON.parse(JSON.stringify(value))); return true; },
