@@ -1,6 +1,6 @@
 import type { Priority, PrioritySignals } from "./mail-priority";
 import { query, withTransaction } from "./postgres";
-import type { UserAbout } from "./user-about";
+import { ABOUT_FIELDS, roleText, type UserAbout } from "./user-about";
 import { lookupToken, open, openJson, seal, sealJson } from "./data-vault";
 
 // Content columns (drafts, AI readings, edited event details, About-you answers, task
@@ -258,12 +258,12 @@ export async function saveCalendarEventState(input: CalendarEventState & { userI
 /** The "About you" details the user entered in Settings, or null if they never saved any. */
 export async function getUserAbout(userId: number): Promise<(UserAbout & { updatedAt: string }) | null> {
   const result = await query<UserAbout & { updated_at: Date }>(`
-    SELECT role, organization, department, interests, notes, updated_at FROM user_about WHERE user_id = $1
+    SELECT role, organization, interests, notes, updated_at FROM user_about WHERE user_id = $1
   `, [userId]);
   const row = result.rows[0];
   if (!row) return null;
   const field = (name: keyof UserAbout) => open(userId, `user_about.${name}`, row[name]) ?? "";
-  return { role: field("role") as UserAbout["role"], organization: field("organization"), department: field("department"), interests: field("interests"), notes: field("notes"), updatedAt: row.updated_at.toISOString() };
+  return { role: roleText(field("role")), organization: field("organization"), interests: field("interests"), notes: field("notes"), updatedAt: row.updated_at.toISOString() };
 }
 
 /**
@@ -272,17 +272,17 @@ export async function getUserAbout(userId: number): Promise<(UserAbout & { updat
  */
 export async function saveUserAbout(userId: number, about: UserAbout) {
   const result = await query<{ updated_at: Date }>(`
-    INSERT INTO user_about (user_id, role, organization, department, interests, notes, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    INSERT INTO user_about (user_id, role, organization, interests, notes, updated_at)
+    VALUES ($1, $2, $3, $4, $5, NOW())
     ON CONFLICT (user_id) DO UPDATE SET
       role = EXCLUDED.role,
       organization = EXCLUDED.organization,
-      department = EXCLUDED.department,
+      department = '', -- Field removed from Settings: never keep an old value the user cannot see.
       interests = EXCLUDED.interests,
       notes = EXCLUDED.notes,
       updated_at = NOW()
     RETURNING updated_at
-  `, [userId, ...(["role", "organization", "department", "interests", "notes"] as const).map((name) => about[name] ? seal(userId, `user_about.${name}`, about[name]) : "")]);
+  `, [userId, ...ABOUT_FIELDS.map((name) => about[name] ? seal(userId, `user_about.${name}`, about[name]) : "")]);
   return result.rows[0].updated_at.toISOString();
 }
 

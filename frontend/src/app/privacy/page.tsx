@@ -60,7 +60,7 @@ export default function PrivacyPolicy() {
             kept so they stay the same each time you open the message, on any device.
           </li>
           <li>
-            <strong>About you (optional):</strong> the role, organization, major or department, topics and note you choose to
+            <strong>About you (optional):</strong> the role, organization, topics and note you choose to
             enter in Settings. Only you can add, change or clear them; MailFlow never fills them in or edits them. They are
             sent to the AI provider together with a message when it is analysed, to judge whether the message concerns you.
           </li>

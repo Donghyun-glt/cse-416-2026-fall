@@ -14,9 +14,9 @@ const { decideTodo, profileForPrompt } = exported;
 
 const source = "TSM Department\n\nThis notice is for TSM majors only. Submit the internship form by December 4, 2026. Can you confirm by reply?";
 const base = { hasTask: true, task: "Submit the internship form by December 4.", taskEvidence: "Submit the internship form by December 4, 2026.", dueDate: "2026-12-04", dueEvidence: "December 4, 2026",
-  needsReply: false, replyEvidence: "", audience: "", audienceEvidence: "", audienceFit: "not_stated", interestMatch: false };
+  needsReply: false, replyEvidence: "", audience: "", audienceEvidence: "", audienceFit: "not_stated", profileEvidence: "", interestMatch: false };
 const input = (extra = {}) => ({ source, sentAt: "2026-11-20T03:00:00Z", now: new Date("2026-11-21T00:00:00Z"), timeZone: "Asia/Seoul", events: [], ...extra });
-const cs = { role: "undergraduate", organization: "SUNY Korea", department: "Computer Science", interests: "", notes: "" };
+const cs = { role: "CS undergraduate", organization: "SUNY Korea", interests: "", notes: "" };
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("a real task is listed with its checked deadline, however far away it is", () => {
@@ -43,11 +43,11 @@ test("an undecided calendar suggestion is listed on its own", () => {
 });
 
 test("the user's profile removes mail addressed to another group, and only then", () => {
-  const forTsm = { ...base, audience: "TSM majors", audienceEvidence: "This notice is for TSM majors only.", audienceFit: "does_not_apply" };
+  const forTsm = { ...base, audience: "TSM majors", audienceEvidence: "This notice is for TSM majors only.", audienceFit: "does_not_apply", profileEvidence: "CS undergraduate" };
   assert.equal(decideTodo(forTsm, input({ about: cs })), null);
   // No profile to compare with: keep it and ask the user to check.
   assert.equal(decideTodo(forTsm, input()).confirmAudience, true);
-  assert.equal(decideTodo(forTsm, input({ about: { ...cs, role: "", organization: "", department: "" } })).confirmAudience, true);
+  assert.equal(decideTodo(forTsm, input({ about: { ...cs, role: "", organization: "" } })).confirmAudience, true);
   // The audience claim must be quoted from the email.
   assert.equal(decideTodo({ ...forTsm, audienceEvidence: "For business students." }, input({ about: cs })).confirmAudience, true);
   // A stated interest keeps it.
@@ -55,12 +55,25 @@ test("the user's profile removes mail addressed to another group, and only then"
   assert.equal(decideTodo({ ...base, audienceFit: "unclear" }, input({ about: cs })).confirmAudience, true);
 });
 
+test("the fact that rules a message out may be typed in any profile field, but must really be there", () => {
+  const forTsm = { ...base, audience: "TSM majors", audienceEvidence: "This notice is for TSM majors only.", audienceFit: "does_not_apply" };
+  // Major written only in "Anything else", or tucked into Organization.
+  assert.equal(decideTodo({ ...forTsm, profileEvidence: "CS major" }, input({ about: { role: "", organization: "", interests: "", notes: "I am a CS major and a club officer" } })), null);
+  assert.equal(decideTodo({ ...forTsm, profileEvidence: "컴퓨터과학" }, input({ about: { role: "학부생", organization: "한국뉴욕주립대 컴퓨터과학", interests: "", notes: "" } })), null);
+  // The model names nothing, or words the user never typed: keep the message and ask the user.
+  assert.equal(decideTodo(forTsm, input({ about: cs })).confirmAudience, true);
+  assert.equal(decideTodo({ ...forTsm, profileEvidence: "Biology major" }, input({ about: cs })).confirmAudience, true);
+  // Caring about a topic is not membership of a group.
+  assert.equal(decideTodo({ ...forTsm, profileEvidence: "internships" }, input({ about: { role: "", organization: "", interests: "internships", notes: "" } })).confirmAudience, true);
+  assert.match(text("lib/summary-todo.ts"), /whichever field a fact was typed in/);
+});
+
 test("a deadline that passed long before the email was analysed is not listed", () => {
   assert.equal(decideTodo(base, input({ now: new Date("2026-12-20T00:00:00Z") })), null);
 });
 
 test("the model only sees profile fields the user filled in", () => {
-  assert.deepEqual(plain(profileForPrompt(cs)), { role: "Undergraduate student", organization: "SUNY Korea", majorOrDepartment: "Computer Science" });
+  assert.deepEqual(plain(profileForPrompt(cs)), { role: "CS undergraduate", organization: "SUNY Korea" });
   assert.deepEqual(plain(profileForPrompt(null)), {});
 });
 

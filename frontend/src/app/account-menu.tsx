@@ -110,7 +110,6 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
               <span className="grid size-8 place-items-center rounded-lg bg-mail-accent-tint text-mail-accent"><AccountIcon name="settings" /></span>
               Settings
             </button>
-            <div className="px-2 pb-1"><ThemePicker theme={theme} onChange={onThemeChange} /></div>
             <div className="border-t border-mail-line pt-2">
               <button type="button" onClick={() => void signOut()} aria-disabled={signingOut}
                 className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-mail-danger transition-colors hover:bg-mail-danger-tint aria-disabled:cursor-wait aria-disabled:opacity-70">

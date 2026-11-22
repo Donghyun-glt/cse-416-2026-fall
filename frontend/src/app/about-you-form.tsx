@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ABOUT_ROLES, ABOUT_ROLE_LABELS, ABOUT_TEXT_LIMIT, EMPTY_ABOUT, type UserAbout } from "@/lib/user-about";
+import { ABOUT_LIMITS, EMPTY_ABOUT, aboutCharLimit, aboutLength, type UserAbout } from "@/lib/user-about";
 
 const textFields = [
+  ["role", "Role", "e.g. CS undergraduate"],
   ["organization", "Organization", "e.g. SUNY Korea"],
-  ["department", "Major or department", "e.g. Computer Science"],
   ["interests", "Topics you care about", "e.g. internships, scholarships"],
   ["notes", "Anything else", "e.g. I am a club officer"],
 ] as const;
@@ -32,11 +32,12 @@ export function AboutYouForm() {
   const busy = status === "loading" || status === "saving";
   const changed = JSON.stringify(about) !== JSON.stringify(saved);
   const hasSaved = JSON.stringify(saved) !== JSON.stringify(EMPTY_ABOUT);
+  const tooLong = textFields.some(([name]) => aboutLength(name, about[name]) > ABOUT_LIMITS[name].max);
   const set = (field: keyof UserAbout, value: string) => { setAbout((current) => ({ ...current, [field]: value })); setMessage(null); };
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !changed) return;
+    if (busy || !changed || tooLong) return;
     setStatus("saving"); setMessage(null);
     try {
       const response = await fetch("/api/profile/about", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(about) });
@@ -67,21 +68,19 @@ export function AboutYouForm() {
       <p className="mt-1 px-1 text-xs leading-5 text-mail-muted">Optional. Helps MailFlow tell which emails concern you. Only you can change these; MailFlow never fills them in or edits them. Please leave out sensitive details.</p>
       {status === "load_failed" ? <p role="alert" className="mt-3 rounded-lg bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">Couldn’t load your details. Close Settings and try again.</p> : (
         <div className="mt-3 space-y-3">
-          <label className={label}>Role
-            <select value={about.role} onChange={(event) => set("role", event.target.value)} disabled={busy} className={field}>
-              <option value="">Not specified</option>
-              {ABOUT_ROLES.map((role) => <option key={role} value={role}>{ABOUT_ROLE_LABELS[role]}</option>)}
-            </select>
-          </label>
-          {textFields.map(([name, text, placeholder]) => (
-            <label key={name} className={label}>
-              <span className="flex justify-between"><span>{text}</span><span className="font-normal tabular-nums text-mail-muted">{[...about[name]].length}/{ABOUT_TEXT_LIMIT}</span></span>
-              <input value={about[name]} onChange={(event) => set(name, event.target.value)} maxLength={ABOUT_TEXT_LIMIT} placeholder={placeholder} disabled={busy} autoComplete="off" className={field} />
-            </label>
-          ))}
+          {textFields.map(([name, text, placeholder]) => {
+            const used = aboutLength(name, about[name]), { max, unit } = ABOUT_LIMITS[name];
+            return (
+              <label key={name} className={label}>
+                <span className="flex justify-between"><span>{text}</span><span className={`font-normal tabular-nums ${used > max ? "font-semibold text-mail-danger" : "text-mail-muted"}`}>{used}/{max} {unit}</span></span>
+                <input value={about[name]} onChange={(event) => set(name, event.target.value)} maxLength={aboutCharLimit(name)} placeholder={placeholder} disabled={busy} autoComplete="off" aria-invalid={used > max} className={field} />
+              </label>
+            );
+          })}
           <div className="flex items-center gap-3 pt-1">
-            <button type="submit" disabled={busy || !changed} className="h-9 rounded-lg bg-[#5944d8] px-4 text-sm font-semibold text-white transition hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">{status === "saving" ? "Saving…" : "Save"}</button>
+            <button type="submit" disabled={busy || !changed || tooLong} className="h-9 rounded-lg bg-[#5944d8] px-4 text-sm font-semibold text-white transition hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">{status === "saving" ? "Saving…" : "Save"}</button>
             {hasSaved && <button type="button" onClick={() => void clear()} disabled={busy} className="text-sm font-semibold text-mail-danger hover:underline disabled:opacity-50">Clear all</button>}
+            {tooLong && <span role="alert" className="text-xs text-mail-danger">Shorten the field marked in red.</span>}
             {message && <span role={message.kind === "error" ? "alert" : "status"} className={`text-xs ${message.kind === "error" ? "text-mail-danger" : "text-mail-success"}`}>{message.text}</span>}
           </div>
         </div>

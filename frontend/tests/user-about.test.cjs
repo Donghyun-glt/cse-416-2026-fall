@@ -32,18 +32,31 @@ function route({ userId = 7, signedIn = true } = {}) {
   return { ...handlers, rows };
 }
 const call = (handler, method, body) => handler[method](new NextRequest("https://mailflow.test/api/profile/about", { method, headers: { cookie: "gmail_session=test", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }));
-const mine = { role: "undergraduate", organization: "SUNY Korea", department: "Computer Science", interests: "인턴십, 장학금", notes: "" };
+const mine = { role: "CS undergraduate", organization: "SUNY Korea", interests: "인턴십, 장학금", notes: "" };
 
-test("every field is optional and text is tidied, never cut", () => {
-  assert.deepEqual({ ...rules.parseUserAbout({}) }, { role: "", organization: "", department: "", interests: "", notes: "" });
-  assert.equal(rules.parseUserAbout({ department: "  Computer   Science " }).department, "Computer Science");
-  assert.equal(rules.parseUserAbout({ interests: "가".repeat(100) }).interests.length, 100);
-  for (const bad of [{ interests: "x".repeat(101) }, { role: "wizard" }, { notes: 5 }, null, "text"]) assert.equal(rules.parseUserAbout(bad), null);
+test("every field is optional free text with its own limit; text is tidied, never cut", () => {
+  assert.deepEqual({ ...rules.parseUserAbout({}) }, { role: "", organization: "", interests: "", notes: "" });
+  assert.equal(rules.parseUserAbout({ role: "  CS   undergraduate " }).role, "CS undergraduate");
+  const words = (count) => Array(count).fill("가나").join(" ");
+  for (const [field, limit] of [["role", 3], ["organization", 10], ["interests", 10]]) {
+    assert.equal(rules.parseUserAbout({ [field]: words(limit) })[field], words(limit));
+    assert.equal(rules.parseUserAbout({ [field]: words(limit + 1) }), null);
+  }
+  // "Anything else" is limited by characters (Korean counts one per letter), not words.
+  assert.equal(rules.parseUserAbout({ notes: "가".repeat(100) }).notes.length, 100);
+  assert.equal(rules.parseUserAbout({ notes: "I am a CS major and a club officer" }).notes, "I am a CS major and a club officer");
+  assert.equal(rules.parseUserAbout({ notes: "x".repeat(101) }), null);
+  // One endless "word" is not a way around the limit, and the removed field is not stored.
+  for (const bad of [{ role: "x".repeat(61) }, { notes: 5 }, null, "text"]) assert.equal(rules.parseUserAbout(bad), null);
+  assert.equal("department" in rules.parseUserAbout({ department: "Computer Science" }), false);
+  // A role saved when it was a fixed choice still reads as what the user picked.
+  assert.equal(rules.roleText("undergraduate"), "Undergraduate student");
+  assert.equal(rules.roleText("TA"), "TA");
 });
 
 test("saved details come back exactly, and Clear all removes them", async () => {
   const handler = route();
-  assert.deepEqual((await (await call(handler, "GET")).json()).about, { role: "", organization: "", department: "", interests: "", notes: "" });
+  assert.deepEqual((await (await call(handler, "GET")).json()).about, { role: "", organization: "", interests: "", notes: "" });
   assert.equal((await call(handler, "PUT", mine)).status, 200);
   const stored = await (await call(handler, "GET")).json();
   assert.deepEqual(stored.about, mine); assert.equal(typeof stored.updatedAt, "string");
@@ -53,7 +66,7 @@ test("saved details come back exactly, and Clear all removes them", async () => 
 
 test("invalid details are rejected and signed-out requests are refused", async () => {
   const handler = route();
-  assert.equal((await call(handler, "PUT", { ...mine, notes: "x".repeat(101) })).status, 400);
+  assert.equal((await call(handler, "PUT", { ...mine, role: "one two three four" })).status, 400);
   assert.equal(handler.rows.size, 0);
   for (const method of ["GET", "PUT", "DELETE"]) assert.equal((await call(route({ signedIn: false }), method, method === "PUT" ? mine : undefined)).status, 401);
   const unlinked = route({ userId: null });

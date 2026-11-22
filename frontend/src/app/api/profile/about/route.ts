@@ -7,8 +7,8 @@ import { EMPTY_ABOUT, parseUserAbout } from "@/lib/user-about";
 
 /**
  * /api/profile/about: the optional details a user enters about themselves in Settings.
- *   GET    -> { about: { role, organization, department, interests, notes }, updatedAt: string | null }
- *   PUT    body: the same five fields (all optional) -> { about, updatedAt }
+ *   GET    -> { about: { role, organization, interests, notes }, updatedAt: string | null }
+ *   PUT    body: the same four fields (all optional free text) -> { about, updatedAt }
  *   DELETE -> { cleared: true }
  * Only the signed-in user's own row is read or written, and this route is the only
  * writer: values come from what the user typed, never from an AI step.

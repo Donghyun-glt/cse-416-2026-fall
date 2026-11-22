@@ -2,7 +2,7 @@ import { candidateSchema, grounded, resolveEmailDate, supportedEmailTime, valida
 import type { Priority, PrioritySignals } from "./mail-priority";
 import { todoPrompt, todoSchema } from "./summary-todo";
 
-export const ANALYSIS_VERSION = "content-v4";
+export const ANALYSIS_VERSION = "content-v5";
 export type KeyPoint = {
   kind: "action" | "deadline" | "preparation" | "consequence" | "logistics" | "change" | "information";
   text: string; evidence: string; importance: "critical" | "important" | "context";
