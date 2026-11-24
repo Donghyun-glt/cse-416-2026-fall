@@ -19,11 +19,10 @@ type StoredEventState = { status?: BriefingEvent["status"]; details?: { title?: 
 const memory = new Map<string, Insight>();
 const MAX_PARALLEL = 3;
 
-async function loadInsight(id: string): Promise<InsightResult> {
-  // Waits and asks again by itself when the AI is rate limited or briefly unavailable.
-  const response = await requestMessageAnalysis(id);
-  const data = await response.json().catch(() => null) as { analysis?: { summary?: string; reason?: string }; candidates?: CalendarSuggestion[]; eventStates?: Record<string, StoredEventState>; priority?: Priority; prioritySaved?: boolean } | null;
-  if (!response.ok || !data?.analysis) return { insight: memory.get(id) ?? null }; // Not analysable (or failed): the card keeps Gmail's snippet.
+type InsightData = { analysis?: { summary?: string; reason?: string }; candidates?: CalendarSuggestion[]; eventStates?: Record<string, StoredEventState>; priority?: Priority; prioritySaved?: boolean };
+
+/** What a card shows, from a stored or fresh analysis of message `id`. */
+function toInsight(id: string, data: InsightData & { analysis: NonNullable<InsightData["analysis"]> }): Insight {
   const candidates = data.candidates ?? [];
   const keys = candidateKeys(candidates);
   const insight: Insight = {
@@ -41,7 +40,37 @@ async function loadInsight(id: string): Promise<InsightResult> {
     }),
   };
   memory.set(id, insight);
-  return { insight, priority: data.prioritySaved && PRIORITIES.includes(data.priority as Priority) ? data.priority : undefined };
+  return insight;
+}
+
+/** One message analysed (or its stored analysis read back) through its own request. */
+async function loadInsight(id: string): Promise<InsightResult> {
+  // Waits and asks again by itself when the AI is rate limited or briefly unavailable.
+  const response = await requestMessageAnalysis(id);
+  const data = await response.json().catch(() => null) as InsightData | null;
+  if (!response.ok || !data?.analysis) return { insight: memory.get(id) ?? null }; // Not analysable (or failed): the card keeps Gmail's snippet.
+  return { insight: toInsight(id, { ...data, analysis: data.analysis }), priority: data.prioritySaved && PRIORITIES.includes(data.priority as Priority) ? data.priority : undefined };
+}
+
+const STORED_BATCH = 200; // The most ids /api/gmail/messages/insights takes at once.
+
+/**
+ * The stored analyses of many messages in one request per 200 (only database reads on the
+ * server). Messages missing from the result have not been analysed yet. Throws when the
+ * request fails, so the caller can fall back to asking message by message.
+ */
+async function loadStoredInsights(ids: string[]): Promise<Map<string, Insight>> {
+  const batches = Array.from({ length: Math.ceil(ids.length / STORED_BATCH) }, (_, i) => ids.slice(i * STORED_BATCH, (i + 1) * STORED_BATCH));
+  const found = new Map<string, Insight>();
+  await Promise.all(batches.map(async (batch) => {
+    const response = await fetch("/api/gmail/messages/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: batch }), cache: "no-store" });
+    if (!response.ok) throw new Error("Stored insights could not be read.");
+    const data = await response.json() as { insights?: Record<string, InsightData> };
+    for (const [id, stored] of Object.entries(data.insights ?? {})) {
+      if (stored.analysis) found.set(id, toInsight(id, { ...stored, analysis: stored.analysis }));
+    }
+  }));
+  return found;
 }
 
 /**
@@ -55,7 +84,10 @@ function withCardMove(update: () => void) {
   document.startViewTransition(() => flushSync(update));
 }
 
-/** Loads insights for the listed messages a few at a time; `undefined` = still loading, `null` = unavailable. */
+/**
+ * Insights for the listed messages: stored ones in a single request, the others analysed a
+ * few at a time. `undefined` = still loading, `null` = unavailable.
+ */
 function useInsights(messages: Mail[], onPriority: (id: string, priority: Priority) => void) {
   const ids = messages.map((message) => message.id);
   const [insights, setInsights] = useState<Record<string, Insight | null>>(() => Object.fromEntries(ids.flatMap((id) => memory.has(id) ? [[id, memory.get(id)!]] : [])));
@@ -88,12 +120,18 @@ function useInsights(messages: Mail[], onPriority: (id: string, priority: Priori
   }, []);
   const idList = ids.join(",");
   useEffect(() => {
-    for (const id of idList ? idList.split(",") : []) {
-      if (started.current.has(id)) continue;
-      started.current.add(id);
-      queue.current.push(id);
-    }
-    pump();
+    const fresh = (idList ? idList.split(",") : []).filter((id) => !started.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) started.current.add(id);
+    // Most cards were analysed before (on an earlier visit, or by Summary): read all of those
+    // in one request and show them together. Only the rest need the AI, a few at a time.
+    void loadStoredInsights(fresh).then((stored) => {
+      if (!alive.current) return;
+      if (stored.size > 0) setInsights((current) => ({ ...current, ...Object.fromEntries(stored) }));
+      queue.current.push(...fresh.filter((id) => !stored.has(id)));
+    }, () => {
+      queue.current.push(...fresh); // Batch read unavailable: ask message by message, as before.
+    }).finally(pump);
   }, [idList, pump]);
   return insights;
 }

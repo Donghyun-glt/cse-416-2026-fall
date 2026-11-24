@@ -290,6 +290,43 @@ export async function getCalendarEventStates(userId: number, gmailMessageId: str
   }]));
 }
 
+/**
+ * Stored analyses of many messages in one query (the Daily Briefing reads a whole day at once).
+ * Messages that have not been analysed yet are simply absent from the map.
+ */
+export async function getMessageInsights(userId: number, gmailMessageIds: readonly string[]): Promise<Map<string, unknown>> {
+  const insights = new Map<string, unknown>();
+  if (gmailMessageIds.length === 0) return insights;
+  const result = await query<{ gmail_message_id: string; analysis: unknown }>(`
+    SELECT gmail_message_id, analysis FROM message_insights WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+  `, [userId, [...gmailMessageIds]]);
+  for (const row of result.rows) {
+    const analysis = openJson(userId, `message_insights.analysis:${row.gmail_message_id}`, row.analysis);
+    if (analysis) insights.set(row.gmail_message_id, analysis);
+  }
+  return insights;
+}
+
+/** getCalendarEventStates for many messages in one query, keyed by message id. */
+export async function getCalendarEventStatesForMessages(userId: number, gmailMessageIds: readonly string[]): Promise<Map<string, Record<string, CalendarEventState>>> {
+  const states = new Map<string, Record<string, CalendarEventState>>();
+  if (gmailMessageIds.length === 0) return states;
+  const result = await query<{ gmail_message_id: string; candidate_key: string; status: CalendarEventStatus; details: Record<string, unknown> }>(`
+    SELECT gmail_message_id, candidate_key, status, details
+    FROM calendar_event_states
+    WHERE user_id = $1 AND gmail_message_id = ANY($2::text[])
+  `, [userId, [...gmailMessageIds]]);
+  for (const row of result.rows) {
+    const forMessage = states.get(row.gmail_message_id) ?? {};
+    forMessage[row.candidate_key] = {
+      status: row.status,
+      details: (openJson(userId, `calendar_event_states.details:${row.gmail_message_id}:${row.candidate_key}`, row.details) ?? {}) as Record<string, unknown>,
+    };
+    states.set(row.gmail_message_id, forMessage);
+  }
+  return states;
+}
+
 export async function saveCalendarEventState(input: CalendarEventState & { userId: number; gmailMessageId: string; candidateKey: string }) {
   await query(`
     INSERT INTO calendar_event_states (user_id, gmail_message_id, candidate_key, status, details, updated_at)
