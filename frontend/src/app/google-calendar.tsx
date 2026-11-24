@@ -88,9 +88,13 @@ export function GoogleCalendar() {
   const monthLabel = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long" }).format(month);
   const todayKey = key(new Date());
   const label = "block text-xs font-extrabold";
+  const calendarDetail = loading ? "Loading events…" : reauthorize ? "Google Calendar is not connected"
+    : error && events.length === 0 ? "Events could not be loaded" : `${events.length} event${events.length === 1 ? "" : "s"} this month · Google Calendar`;
   return <div className="space-y-8">
     <section>
-      <SectionHead eyebrow={monthLabel} title="Your calendar"
+      {/* Three lines like the mailbox heading (label, title, status), so "+ Add event" sits exactly
+          where "+ Compose" does on the mailbox pages and the month grid starts at the same height. */}
+      <SectionHead eyebrow={monthLabel} title="Your calendar" detail={calendarDetail}
         actions={<>
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => { const now = new Date(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setSelected(key(now)); }} className={chip(false)}>Today</button>
@@ -117,7 +121,6 @@ export function GoogleCalendar() {
           </button>;
         })}
       </div>
-      {loading && <p className="mt-3 text-[13px] text-mail-muted">Loading events…</p>}
     </section>
     <section className="border-t border-mail-line pt-7">
       <SectionHead eyebrow="Selected day" as="h3" title={new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(`${selected}T12:00:00`))} className="mb-0" />
