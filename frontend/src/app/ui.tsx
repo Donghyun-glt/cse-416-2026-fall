@@ -8,9 +8,11 @@ export const panel = "rounded-[17px] border border-mail-line bg-mail-surface sha
 /** Inner spacing of a panel. */
 export const panelPad = "p-[17px] sm:p-[23px]";
 
-// Buttons. The primary purple stays the same in dark mode, where it still reads on white text.
-export const primaryButton = "inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#5944d8] bg-[#5944d8] px-4 py-2.5 text-[13px] font-extrabold text-white transition hover:bg-[#4933c6] disabled:cursor-not-allowed disabled:opacity-45";
-export const secondaryButton = "inline-flex items-center justify-center gap-2 rounded-[10px] border border-mail-line bg-mail-surface px-4 py-2.5 text-[13px] font-extrabold text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-45";
+// Buttons. Rounded pills: the primary one is the violet gradient of the logo, the compose
+// button and the dock, lit along its top edge; it stays the same in dark mode. Sizes and
+// padding are unchanged, so call sites that adjust them still line up.
+export const primaryButton = "inline-flex items-center justify-center gap-2 rounded-full border border-transparent bg-gradient-to-br from-[#8b7bff] via-[#6a55e6] to-[#4a36c4] px-4 py-2.5 text-[13px] font-extrabold text-white shadow-[0_6px_16px_rgba(89,68,216,0.3),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:-translate-y-px hover:brightness-110 hover:shadow-[0_9px_22px_rgba(89,68,216,0.4),inset_0_1px_0_rgba(255,255,255,0.35)] active:translate-y-0 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none";
+export const secondaryButton = "inline-flex items-center justify-center gap-2 rounded-full border border-mail-line bg-mail-surface px-4 py-2.5 text-[13px] font-extrabold text-mail-secondary shadow-[0_1px_2px_rgba(40,39,34,0.06),inset_0_1px_0_rgba(255,255,255,0.06)] transition hover:border-mail-accent-line hover:text-mail-accent active:scale-[0.97] disabled:pointer-events-none disabled:opacity-45";
 /** Small outlined button for actions inside rows and toolbars. */
 export const smallButton = "inline-flex items-center justify-center gap-1.5 rounded-lg border border-mail-line bg-mail-surface px-2.5 py-1 text-xs font-bold text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-45";
 /** Purple text link-button ("View full calendar →", "← Back to emails"). */
