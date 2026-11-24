@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MailAnalysis } from "@/lib/mail-analysis";
+import { requestMessageAnalysis } from "@/lib/message-analysis-request";
+import { Eyebrow, field as fieldClass, primaryButton, smallButton } from "./ui";
 import type { Priority } from "@/lib/mail-priority";
 import { candidateKeys, type CalendarSuggestion } from "@/lib/calendar-suggestion";
 import { calendarInstant } from "@/lib/calendar-time";
@@ -13,6 +15,8 @@ const errorMessages: Record<string, string> = {
   calendar_rate_limited: "Google Calendar is busy. Try again shortly.",
   not_configured: "Calendar analysis is not configured on this server.",
   rate_limited: "AI is busy. Try again shortly.",
+  request_failed: "AI is temporarily unavailable. Try again shortly.",
+  empty_response: "AI is temporarily unavailable. Try again shortly.",
 };
 
 function addHour(local: string) {
@@ -97,13 +101,13 @@ function Candidate({ candidate, candidateKey, messageId, initial }: { candidate:
     finally { setSaving(false); }
   }
   if (status === "dismissed") return null;
-  if (status === "saved") return <p role="status" className="rounded-xl bg-mail-success-tint p-3 text-sm text-mail-success">Added to calendar: {title}</p>;
-  const field = "mt-1 w-full rounded-lg border border-mail-line p-2 text-sm";
+  if (status === "saved") return <p role="status" className="rounded-[10px] bg-mail-success-tint p-3 text-[13px] text-mail-success">Added to calendar: {title}</p>;
+  const field = `${fieldClass} mt-1.5`;
   const checks = candidate.warnings?.length ?? 0;
   const assumed = !candidate.endTime || !candidate.timeZone;
   const shownDate = allDay ? date : start.slice(0, 10) || date;
   const shownTime = allDay || start.length < 16 ? null : start.slice(11, 16);
-  return <article className="rounded-xl border border-mail-accent-line p-4 text-sm">
+  return <article className="rounded-[13px] border border-mail-accent-line bg-mail-accent-tint/40 p-4 text-[13px]">
     <p className="font-semibold">{title}</p>
     <p className="mt-1 text-mail-secondary">{whenLabel(shownDate, shownTime)}{candidate.timeZone ? ` · ${candidate.timeZone}` : ""}{location ? ` · ${location}` : ""}</p>
     <details className="mt-2 text-xs text-mail-secondary">
@@ -112,7 +116,7 @@ function Candidate({ candidate, candidateKey, messageId, initial }: { candidate:
       {Boolean(candidate.notes?.length) && <ul className="mt-2 list-disc space-y-1 pl-4">{candidate.notes!.map((note, index) => <li key={index}>{note}</li>)}</ul>}
       {checks > 0 && <ul className="mt-2 list-disc space-y-1 rounded-lg bg-mail-warning-tint p-3 pl-6 text-mail-warning">{candidate.warnings!.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
     </details>
-    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white">Edit &amp; add</button><button onClick={() => setStatus("dismissed")} className="px-2 py-2 text-mail-secondary">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-mail-accent-line pt-3">
+    {!editing ? <div className="mt-3 flex gap-3"><button onClick={() => setEditing(true)} className={primaryButton}>Edit &amp; add</button><button onClick={() => setStatus("dismissed")} className="px-2 py-2 text-mail-secondary">Dismiss</button></div> : <form onSubmit={save} className="mt-3 space-y-3 border-t border-mail-accent-line pt-3">
       <label className="block">Title<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={field} /></label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={allDay} onChange={(e) => { setAllDay(e.target.checked); setChecked(false); }} />All day</label>
       {allDay ? <label className="block">Date<input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={field} /></label> : <>
@@ -124,7 +128,7 @@ function Candidate({ candidate, candidateKey, messageId, initial }: { candidate:
       <label className="block">Location<input maxLength={500} value={location} onChange={(e) => setLocation(e.target.value)} className={field} /></label>
       <label className="block">Notes<textarea rows={3} maxLength={8000} value={description} onChange={(e) => setDescription(e.target.value)} className={field} /></label>
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" required checked={checked} onChange={(e) => setChecked(e.target.checked)} />I checked these details.</label>
-      <div className="flex gap-3"><button disabled={!checked || saving} className="rounded-lg bg-[#5944d8] px-3 py-2 font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Add to calendar"}</button><button type="button" disabled={saving} onClick={() => setEditing(false)} className="px-2 py-2 text-mail-secondary">Cancel</button></div>
+      <div className="flex gap-3"><button disabled={!checked || saving} className={primaryButton}>{saving ? "Saving…" : "Add to Calendar"}</button><button type="button" disabled={saving} onClick={() => setEditing(false)} className="px-2 py-2 text-mail-secondary">Cancel</button></div>
     </form>}
     {error && <p role="alert" className="mt-3 text-xs text-mail-danger">{error} {error === errorMessages.calendar_authorization_required && <a href="/api/google/connect" className="underline">Reconnect Google</a>}</p>}
   </article>;
@@ -156,7 +160,7 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
     const timeout = window.setTimeout(async () => {
       setStatus("Reading this email for important information…"); setFailed(false);
       try {
-        const response = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}/calendar-suggestions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }), signal: controller.signal });
+        const response = await requestMessageAnalysis(messageId, controller.signal);
         const data = await response.json();
         if (!response.ok) throw new Error(errorMessages[data.error] ?? "Could not check this email for events.");
         if (controller.signal.aborted) return;
@@ -174,17 +178,18 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
     return () => { clearTimeout(timeout); controller.abort(); };
   }, [messageId, retry, onAnalyzedPriority]);
   const keys = candidateKeys(candidates);
-  return <section className="mb-4 space-y-4 rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-sm" aria-label="Email insights">
-    <h2 className="text-xs font-bold uppercase tracking-wide text-mail-accent">Email insights</h2>
+  return <section className="space-y-4" aria-label="Email insights">
+    <div><Eyebrow>✦ Email insights</Eyebrow><h3 className="mt-[9px] text-[17px] tracking-[-0.02em]">At a glance</h3></div>
     {analysis && <>
       <p className="text-sm leading-6">{analysis.reason}</p>
-      {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-mail-warning-tint p-3 text-xs text-mail-warning">{note}</p>)}
+      {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-[10px] bg-mail-warning-tint p-3 text-xs text-mail-warning">{note}</p>)}
+      <small className="block text-[11px] leading-[1.6] text-mail-muted">AI suggestions may be inaccurate. Check the original message.</small>
     </>}
     {analysis && <div className="flex items-center justify-between gap-3 border-t border-mail-line pt-3 text-xs">
       <span className="min-w-0 text-mail-secondary">{inSummary ? <>In Summary{todo.task ? <>: <span className="font-semibold text-foreground">{todo.task}</span></> : ""}</> : todo?.status === "done" ? "Marked done in Summary" : "Not in Summary"}</span>
-      <button type="button" disabled={todoBusy} onClick={() => void markTodo(inSummary ? "done" : "open")} className="shrink-0 rounded-lg border border-mail-line px-2.5 py-1 font-semibold text-mail-secondary hover:bg-mail-muted-surface disabled:opacity-50">{inSummary ? "Mark done" : "Add to Summary"}</button>
+      <button type="button" disabled={todoBusy} onClick={() => void markTodo(inSummary ? "done" : "open")} className={`${smallButton} shrink-0`}>{inSummary ? "Mark done" : "Add to Summary"}</button>
     </div>}
-    <div className="border-t border-mail-line pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-mail-accent">Suggested events</h3>{status && <p role="status" className="text-xs text-mail-secondary">{status}</p>}</div>
+    <div className="border-t border-mail-line pt-3"><h4 className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.12em] text-mail-accent">Suggested events</h4>{status && <p role="status" className="text-xs text-mail-secondary">{status}</p>}</div>
     {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-mail-accent underline">Retry analysis</button>}
     {candidates.map((candidate, index) => <Candidate key={keys[index]} candidate={candidate} candidateKey={keys[index]} messageId={messageId} initial={eventStates[keys[index]]} />)}
   </section>;

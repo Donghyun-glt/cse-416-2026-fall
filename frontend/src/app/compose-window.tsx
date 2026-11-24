@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { draftTextToHtml } from "@/lib/compose-draft";
+import { fetchWithRetry } from "@/lib/retry-fetch";
+import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
+import { chip, primaryButton } from "./ui";
 import { GIcon, MAX_ATTACHMENT_BYTES, ToolbarButton, formatBytes } from "./mail-detail";
 import { COMPOSER_FONTS, EDITOR_CONTENT_CLASS, FormatToolbar } from "./format-toolbar";
 
@@ -15,6 +19,19 @@ const sendErrors: Record<string, string> = {
 };
 type Fields = { to: string; cc: string; bcc: string; subject: string; files: File[] };
 
+// The same three tone and length steps as the AI reply panel in the message view.
+const AI_TONES: [ReplyTone, string][] = [["friendly", "Casual"], ["professional", "Polite"], ["formal", "Formal"]];
+const AI_LENGTHS: [ReplyLength, string][] = [["short", "Short"], ["medium", "Medium"], ["long", "Detailed"]];
+// Gemini is often briefly overloaded; the window quietly tries again a few times first.
+const AI_ATTEMPTS = 3;
+const AI_MAX_WAIT_SECONDS = 8;
+const aiErrors: Record<string, string> = {
+  ai_rate_limited: "AI is busy right now. Try again in a moment.",
+  ai_unavailable: "AI is overloaded right now (Gemini is turning requests away). Try again in a minute.",
+  ai_not_configured: "AI drafting is not configured on this server.",
+  ai_empty_response: "AI did not return a draft. Try rephrasing your request.",
+};
+
 /**
  * Gmail-style floating "New Message" window. It lives beside the mailbox, so it stays
  * open while the user reads other mail, and like Gmail it autosaves to Drafts as the
@@ -22,7 +39,15 @@ type Fields = { to: string; cc: string; bcc: string; subject: string; files: Fil
  * Closing keeps the draft; the bin discards it. It shares the editor toolbar and
  * attachment rules with the reply composer in the message view.
  */
-export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeDraft | null; onClose: (change: "none" | "saved" | "discarded") => void; onSent: () => void }) {
+export function ComposeWindow({ initial, onClose, onSent, closeRequest = 0, senderName = "" }: {
+  initial?: ComposeDraft | null;
+  /** The user's name, for the sign-off of AI-written drafts. */
+  senderName?: string;
+  onClose: (change: "none" | "saved" | "discarded") => void;
+  onSent: () => void;
+  /** Bumped by the page to close the window the way its X does (the draft is kept). */
+  closeRequest?: number;
+}) {
   const [to, setTo] = useState(initial?.to ?? "");
   const [cc, setCc] = useState(initial?.cc ?? "");
   const [bcc, setBcc] = useState(initial?.bcc ?? "");
@@ -37,6 +62,21 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
   const [draftStatus, setDraftStatus] = useState<"" | "saving" | "saved" | "error">("");
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ----- Write with AI -----
+  // The user describes the email; AI fills in the subject and body for them to review.
+  // With text already in the editor, the request revises that text instead.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiRequest, setAiRequest] = useState("");
+  const [aiTone, setAiTone] = useState<ReplyTone>("professional");
+  const [aiLength, setAiLength] = useState<ReplyLength>("medium");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiRetry, setAiRetry] = useState(""); // "AI is busy. Trying again (2 of 3)…" while waiting.
+  const aiAbort = useRef<AbortController | null>(null);
+  // Closing the window stops a request that is still running or waiting to retry.
+  useEffect(() => () => aiAbort.current?.abort(), []);
+  const [aiUndo, setAiUndo] = useState<{ subject: string; html: string } | null>(null);
 
   // ----- Draft autosave -----
   const draftIdRef = useRef(initial?.draftId ?? "");
@@ -107,6 +147,48 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
   useEffect(() => () => { if (!closed.current) void saveDraft(); }, [saveDraft]);
 
   const syncBody = () => { setBody(editorRef.current?.innerText ?? ""); setRevision((value) => value + 1); };
+  const writeWithAi = async () => {
+    const instructions = aiRequest.trim();
+    if (!instructions || aiBusy) return;
+    setAiBusy(true);
+    setAiError("");
+    setAiRetry("");
+    const controller = new AbortController();
+    aiAbort.current = controller;
+    try {
+      const response = await fetchWithRetry("/api/gmail/compose/ai-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructions, tone: aiTone, length: aiLength, to: [to, cc].filter((value) => value.trim()).join(", "), subject, currentBody: (editorRef.current?.innerText ?? "").replace(/\u200b/g, "").trim(), senderName }),
+        signal: controller.signal,
+      }, {
+        attempts: AI_ATTEMPTS,
+        maxWaitSeconds: AI_MAX_WAIT_SECONDS,
+        onRetry: (next) => setAiRetry(`AI is busy. Trying again (${next} of ${AI_ATTEMPTS})…`),
+      });
+      const data = await response.json().catch(() => ({})) as { subject?: string; body?: string; error?: string };
+      if (!response.ok || !data.body) throw new Error(aiErrors[data.error ?? ""] ?? "AI could not write a draft. Try again.");
+      setAiUndo({ subject, html: editorRef.current?.innerHTML ?? "" });
+      if (data.subject) setSubject(data.subject);
+      if (editorRef.current) editorRef.current.innerHTML = draftTextToHtml(data.body);
+      syncBody();
+      setAiRequest(""); // The next request revises this draft ("make it shorter").
+    } catch (cause) {
+      if (!controller.signal.aborted) setAiError(cause instanceof Error ? cause.message : "AI could not write a draft. Try again.");
+    } finally {
+      if (aiAbort.current === controller) aiAbort.current = null;
+      setAiBusy(false);
+      setAiRetry("");
+    }
+  };
+  const cancelAi = () => aiAbort.current?.abort();
+  const undoAi = () => {
+    if (!aiUndo) return;
+    setSubject(aiUndo.subject);
+    if (editorRef.current) editorRef.current.innerHTML = aiUndo.html;
+    syncBody();
+    setAiUndo(null);
+  };
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
     const next = [...files];
@@ -123,11 +205,24 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
   const hasContent = Boolean(subject.trim() || body.replace(/​/g, "").trim() || files.length);
   const canSend = hasRecipient && hasContent && !sending;
   // Save & close, like Gmail's X: the message stays in Drafts.
+  const closing = useRef(false);
   const close = async () => {
+    if (closing.current) return; // A second click while the draft is being saved does nothing more.
+    closing.current = true;
     await saveDraft();
     closed.current = true;
     onClose(draftIdRef.current ? "saved" : "none");
   };
+  // The page's Compose button toggles this window: each new request closes it like the X.
+  // A window opened after earlier requests ignores them (only changes count).
+  const closeRef = useRef(close);
+  useEffect(() => { closeRef.current = close; });
+  const handledCloseRequest = useRef(closeRequest);
+  useEffect(() => {
+    if (closeRequest === handledCloseRequest.current) return;
+    handledCloseRequest.current = closeRequest;
+    void closeRef.current();
+  }, [closeRequest]);
   const discard = async () => {
     closed.current = true;
     await saveChain.current;
@@ -154,9 +249,9 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
   const row = "flex items-center gap-2 border-b border-mail-line px-4 text-sm";
   const input = "min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-mail-muted";
   return (
-    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-xl border border-mail-line bg-mail-surface shadow-[0_8px_30px_rgba(0,0,0,.25)] sm:right-6 ${minimized ? "sm:w-[300px]" : "max-h-[90vh] sm:w-[620px]"}`}>
-      <header className="flex h-10 shrink-0 cursor-pointer items-center gap-1 bg-mail-muted-surface pl-4 pr-1 text-sm font-semibold text-foreground" onClick={() => setMinimized((value) => !value)}>
-        <span className="min-w-0 flex-1 truncate">{subject.trim() || "New Message"}</span>
+    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-[17px] border border-mail-line bg-mail-surface shadow-[0_25px_70px_rgba(21,17,26,0.27)] sm:bottom-[92px] sm:right-6 sm:rounded-[17px] ${minimized ? "sm:w-[300px]" : "max-h-[90vh] sm:max-h-[calc(100vh-116px)] sm:w-[620px]"}`}>
+      <header className="flex h-12 shrink-0 cursor-pointer items-center gap-1 border-b border-mail-line pl-4 pr-1.5 text-foreground" onClick={() => setMinimized((value) => !value)}>
+        <span className="min-w-0 flex-1 truncate"><span className="mr-2 text-[11px] font-extrabold uppercase tracking-[0.12em] text-mail-accent">New message</span><span className="text-[13px] font-bold">{subject.trim()}</span></span>
         <button type="button" onClick={(event) => { event.stopPropagation(); setMinimized((value) => !value); }} aria-label={minimized ? "Expand" : "Minimize"} title={minimized ? "Expand" : "Minimize"} className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-mail-secondary hover:bg-mail-hover">{minimized ? "▴" : "–"}</button>
         <button type="button" onClick={(event) => { event.stopPropagation(); void close(); }} aria-label="Save and close" title="Save & close" className="flex h-8 w-8 items-center justify-center rounded text-mail-secondary hover:bg-mail-hover"><GIcon name="close" className="h-4 w-4" /></button>
       </header>
@@ -171,6 +266,38 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
           <label className={row}><span className="shrink-0 text-mail-secondary">Bcc</span><input value={bcc} onChange={(event) => setBcc(event.target.value)} type="text" inputMode="email" aria-label="Bcc" className={input} /></label>
         </>}
         <label className={row}><input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={500} aria-label="Subject" placeholder="Subject" className={input} /></label>
+
+        {aiOpen && (
+          <div className="border-b border-mail-line bg-gradient-to-b from-mail-accent-tint/70 to-transparent px-4 py-3" role="group" aria-label="Write with AI">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-mail-accent">✦ Write with AI</span>
+              <button type="button" onClick={() => { cancelAi(); setAiOpen(false); }} aria-label="Close Write with AI" className="flex h-6 w-6 items-center justify-center rounded-full text-mail-secondary hover:bg-mail-hover"><GIcon name="close" className="h-3.5 w-3.5" /></button>
+            </div>
+            <textarea value={aiRequest} onChange={(event) => setAiRequest(event.target.value)} rows={2} maxLength={1000} disabled={aiBusy} autoFocus
+              onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void writeWithAi(); } }}
+              aria-label="What should this email say?"
+              placeholder={body.trim() ? "How should AI change this draft? e.g. make it shorter, write it in English" : "What should this email say? e.g. ask Professor Kim to move our meeting to Friday"}
+              className="block w-full resize-none rounded-[10px] border border-mail-line bg-mail-surface px-3 py-2 text-[13px] leading-5 text-foreground outline-none placeholder:text-mail-muted focus:border-mail-accent-line focus:ring-2 focus:ring-mail-accent/20 disabled:opacity-60" />
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="flex items-center gap-1" role="radiogroup" aria-label="Tone">
+                {AI_TONES.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={aiTone === value} onClick={() => setAiTone(value)} className={`${chip(aiTone === value)} h-7 px-2.5`}>{label}</button>)}
+              </span>
+              <span className="flex items-center gap-1" role="radiogroup" aria-label="Length">
+                {AI_LENGTHS.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={aiLength === value} onClick={() => setAiLength(value)} className={`${chip(aiLength === value)} h-7 px-2.5`}>{label}</button>)}
+              </span>
+              <span className="ml-auto flex items-center gap-2">
+                {aiUndo && !aiBusy && <button type="button" onClick={undoAi} className="text-xs font-bold text-mail-secondary underline-offset-2 hover:underline">Undo</button>}
+                {aiBusy && <button type="button" onClick={cancelAi} className="text-xs font-bold text-mail-secondary underline-offset-2 hover:underline">Cancel</button>}
+                <button type="button" onClick={() => void writeWithAi()} disabled={!aiRequest.trim() || aiBusy} className={`${primaryButton} h-8 px-3 py-0 text-xs`}>
+                  {aiBusy ? "Writing…" : body.trim() ? "✦ Revise" : "✦ Write draft"}
+                </button>
+              </span>
+            </div>
+            {aiRetry && <p role="status" className="mt-2 text-xs text-mail-accent">{aiRetry}</p>}
+            {aiError && <p role="alert" className="mt-2 text-xs text-mail-danger">{aiError}</p>}
+            {aiUndo && !aiError && !aiBusy && <p role="status" className="mt-2 text-xs text-mail-muted">AI wrote this draft. Check it before you send.</p>}
+          </div>
+        )}
 
         <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Message body"
           onInput={syncBody}
@@ -201,9 +328,13 @@ export function ComposeWindow({ initial, onClose, onSent }: { initial?: ComposeD
         <FormatToolbar editorRef={editorRef} onChange={syncBody} className="mx-4 mb-2" />
 
         <div className="flex items-center gap-3 px-4 pb-3 pt-1">
-          <button type="button" onClick={() => void send()} disabled={!canSend} className="h-9 rounded-full bg-[#5b4bd6] px-6 text-sm font-medium text-white transition hover:bg-[#4b3dc0] disabled:cursor-not-allowed disabled:opacity-50">{sending ? "Sending…" : "Send"}</button>
+          <button type="button" onClick={() => void send()} disabled={!canSend} className={`${primaryButton} h-9 px-6 py-0`}>{sending ? "Sending…" : "Send"}</button>
           <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => addFiles(event.target.files)} />
           <ToolbarButton icon="attach" label="Attach files" onClick={() => fileInputRef.current?.click()} />
+          <button type="button" onClick={() => setAiOpen((open) => !open)} aria-expanded={aiOpen} title="Write with AI"
+            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-extrabold transition ${aiOpen ? "bg-mail-accent-tint text-mail-accent" : "text-mail-accent hover:bg-mail-accent-tint"}`}>
+            <GIcon name="sparkle" className="h-4 w-4" /><span className="hidden sm:inline">Write with AI</span>
+          </button>
           <span className={`text-xs ${draftStatus === "error" ? "text-mail-danger" : "text-mail-secondary"}`} role="status">
             {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Saved to Drafts" : draftStatus === "error" ? "Draft not saved. Retrying when you type." : ""}
           </span>

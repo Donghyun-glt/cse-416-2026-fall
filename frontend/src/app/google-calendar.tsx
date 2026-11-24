@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SectionHead, chip, field, primaryButton, secondaryButton } from "./ui";
 
 type Event = { id: string; title: string; start: string; end: string; allDay: boolean; location: string; url: string };
 const key = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -84,15 +85,54 @@ export function GoogleCalendar() {
     finally { setSaving(false); }
   }
 
-  return <div className="space-y-5">
-    <section className="rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-sm md:p-7">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-2xl font-extrabold">{new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long" }).format(month)}</h2><div className="flex gap-2"><button onClick={() => { const now = new Date(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setSelected(key(now)); }} className="rounded-lg border border-mail-line px-3 py-2 text-sm">Today</button><button aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-lg border border-mail-line px-3 py-2">‹</button><button aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-lg border border-mail-line px-3 py-2">›</button><button onClick={showForm} className="rounded-lg bg-[#5944d8] px-4 py-2 text-sm font-bold text-white">Add event</button></div></div>
-      {reauthorize && <p className="mb-4 rounded-xl bg-mail-accent-tint p-4 text-sm">Calendar access is required. <a href="/api/google/connect" className="font-bold text-mail-accent underline">Reconnect Google account</a></p>}
-      {error && <p role="alert" className="mb-4 rounded-xl bg-mail-danger-tint p-4 text-sm text-mail-danger">{error}</p>}
-      <div className="grid grid-cols-7 border-l border-t border-mail-line">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="border-b border-r border-mail-line py-2 text-center text-xs font-bold text-mail-muted">{day}</div>)}{days.map((date) => { const current = key(date); const items = dayEvents(date); return <button key={current} onClick={() => { setSelected(current); if (date.getMonth() !== month.getMonth()) setMonth(new Date(date.getFullYear(), date.getMonth(), 1)); }} aria-pressed={current === selected} className={`min-h-20 overflow-hidden border-b border-r border-mail-line p-1 text-left md:min-h-24 ${date.getMonth() === month.getMonth() ? "bg-mail-surface" : "bg-mail-muted-surface text-mail-muted"} ${current === selected ? "ring-2 ring-inset ring-mail-accent" : ""}`}><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${current === key(new Date()) ? "bg-[#5944d8] text-white" : ""}`}>{date.getDate()}</span>{items.slice(0, 2).map((item, i) => <span key={`${item.id}-${i}`} className="mt-1 block truncate rounded bg-mail-accent-tint px-1 text-[10px] text-mail-accent">{item.title}</span>)}{items.length > 2 && <span className="text-[10px]">+{items.length - 2}</span>}</button>; })}</div>
-      {loading && <p className="mt-3 text-sm text-mail-muted">Loading events…</p>}
+  const monthLabel = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long" }).format(month);
+  const todayKey = key(new Date());
+  const label = "block text-xs font-extrabold";
+  return <div className="space-y-8">
+    <section>
+      <SectionHead eyebrow={monthLabel} title="Your calendar"
+        actions={<>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => { const now = new Date(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setSelected(key(now)); }} className={chip(false)}>Today</button>
+            <button type="button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className={`${chip(false)} w-8 justify-center px-0 text-base`}>‹</button>
+            <button type="button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className={`${chip(false)} w-8 justify-center px-0 text-base`}>›</button>
+          </div>
+          <button type="button" onClick={showForm} className={primaryButton}>+ Add event</button>
+        </>} />
+      {reauthorize && <p className="mb-4 rounded-[10px] bg-mail-accent-tint p-4 text-[13px]">Calendar access is required. <a href="/api/google/connect" className="font-bold text-mail-accent underline">Reconnect Google account</a></p>}
+      {error && <p role="alert" className="mb-4 rounded-[10px] border border-mail-danger-line bg-mail-danger-tint p-4 text-[13px] text-mail-danger">{error}</p>}
+      <div className="grid grid-cols-7 border-l border-t border-mail-line">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <b key={day} className="border-b border-r border-mail-line py-3 text-center text-[11px] font-bold text-mail-muted">{day}</b>)}
+        {days.map((date) => {
+          const current = key(date);
+          const items = dayEvents(date);
+          return <button key={current} type="button" aria-pressed={current === selected}
+            onClick={() => { setSelected(current); if (date.getMonth() !== month.getMonth()) setMonth(new Date(date.getFullYear(), date.getMonth(), 1)); }}
+            className={`flex min-h-[70px] flex-col justify-start overflow-hidden border-b border-r border-mail-line p-[3px] text-left text-xs transition hover:bg-mail-muted-surface sm:min-h-[105px] sm:p-[9px] ${date.getMonth() === month.getMonth() ? "bg-mail-surface" : "bg-mail-muted-surface text-mail-muted"} ${current === selected ? "ring-2 ring-inset ring-mail-accent" : ""}`}>
+            <span className={`inline-flex h-6 min-w-6 self-start items-center justify-center rounded-full px-1.5 ${current === todayKey ? "bg-[#5944d8] font-bold text-white" : ""}`}>{date.getDate()}</span>
+            {items.slice(0, 2).map((item, i) => <small key={`${item.id}-${i}`} className="mt-1.5 block truncate rounded-[5px] bg-mail-accent-tint px-[5px] py-[3px] text-[8px] leading-[1.3] text-mail-accent sm:mt-2.5 sm:p-[5px] sm:text-[10px]">{item.title}</small>)}
+            {items.length > 2 && <span className="mt-1 block text-[10px] text-mail-muted">+{items.length - 2} more</span>}
+          </button>;
+        })}
+      </div>
+      {loading && <p className="mt-3 text-[13px] text-mail-muted">Loading events…</p>}
     </section>
-    <section className="rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-sm md:p-7"><h3 className="mb-4 text-lg font-extrabold">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(`${selected}T12:00:00`))} events</h3>{selectedEvents.length === 0 ? <p className="text-sm text-mail-muted">No events for this day.</p> : <ul className="space-y-3">{selectedEvents.map((item, i) => <li key={`${item.id}-${i}`} className="rounded-xl border border-mail-line p-3"><strong className="block text-sm">{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-mail-accent underline">{item.title}</a> : item.title}</strong><span className="mt-1 block text-xs text-mail-muted">{item.allDay ? "All day" : new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(item.start))}{item.location ? ` · ${item.location}` : ""}</span></li>)}</ul>}</section>
-    {form && <form onSubmit={save} className="rounded-2xl border border-mail-line bg-mail-surface p-5 shadow-sm md:p-7"><h3 className="mb-4 text-lg font-extrabold">New event</h3><div className="grid gap-3 md:grid-cols-2"><label className="text-sm">Title<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full rounded-lg border border-mail-line p-2" /></label><label className="text-sm">Location<input maxLength={500} value={location} onChange={(e) => setLocation(e.target.value)} className="mt-1 w-full rounded-lg border border-mail-line p-2" /></label><label className="text-sm">Start<input required type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 w-full rounded-lg border border-mail-line p-2" /></label><label className="text-sm">End<input required type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 w-full rounded-lg border border-mail-line p-2" /></label></div><div className="mt-4 flex gap-2"><button disabled={saving} className="rounded-lg bg-[#5944d8] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{saving ? "Saving…" : "Save to Google Calendar"}</button><button type="button" onClick={() => setForm(false)} className="rounded-lg border border-mail-line px-4 py-2 text-sm">Cancel</button></div></form>}
+    <section className="border-t border-mail-line pt-7">
+      <SectionHead eyebrow="Selected day" as="h3" title={new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(`${selected}T12:00:00`))} className="mb-0" />
+      {selectedEvents.length === 0 ? <p className="mt-[18px] border-t border-mail-line pt-[13px] text-[13px] text-mail-muted">No events for this day.</p> : <ul className="mt-[18px]">{selectedEvents.map((item, i) => <li key={`${item.id}-${i}`} className="flex items-center gap-5 border-t border-mail-line py-[13px] text-[13px]">
+        <strong className="w-[65px] shrink-0 text-mail-accent">{item.allDay ? "All day" : new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(item.start))}</strong>
+        <span className="min-w-0"><b className="block">{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-mail-accent underline-offset-2 hover:underline">{item.title}</a> : item.title}</b>{item.location && <small className="mt-[3px] block text-mail-muted">{item.location}</small>}</span>
+      </li>)}</ul>}
+    </section>
+    {form && <form onSubmit={save} className="border-t border-mail-line pt-7">
+      <SectionHead eyebrow="New event" as="h3" title="Add to Google Calendar" />
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className={label}>Title<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={`${field} mt-1.5`} /></label>
+        <label className={label}>Location<input maxLength={500} value={location} onChange={(e) => setLocation(e.target.value)} className={`${field} mt-1.5`} /></label>
+        <label className={label}>Start<input required type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className={`${field} mt-1.5`} /></label>
+        <label className={label}>End<input required type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} className={`${field} mt-1.5`} /></label>
+      </div>
+      <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setForm(false)} className={secondaryButton}>Cancel</button><button disabled={saving} className={primaryButton}>{saving ? "Saving…" : "Save to Google Calendar"}</button></div>
+    </form>}
   </div>;
 }

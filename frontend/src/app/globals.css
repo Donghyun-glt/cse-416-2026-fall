@@ -11,6 +11,8 @@
   --mail-read-text: #252521;
   /* Space around an email's own (always light) page; only needed on a dark surface. */
   --mail-paper-pad: 0px;
+  /* The email body sits straight on the page in light mode; dark mode gives it a white sheet. */
+  --mail-paper: transparent;
   --mail-line: #e4e2dd;
   --mail-line-strong: #85817a;
   --mail-secondary: #59564f;
@@ -27,6 +29,31 @@
   --mail-success: #326653;
   --mail-success-tint: #e8f1ee;
   --mail-link: #0b57d0;
+  /* Page canvas: two soft glows behind everything, and the translucent page header. */
+  --mail-glow-a: rgba(151, 132, 255, 0.12);
+  --mail-glow-b: rgba(123, 202, 255, 0.1);
+  --mail-header: rgba(255, 255, 255, 0.78);
+  /* Daily Briefing priority lanes. */
+  --mail-lane-urgent: #fff3f4;
+  --mail-lane-urgent-line: #efd6d8;
+  --mail-lane-fyi: #fff8e9;
+  --mail-lane-fyi-line: #eadfc7;
+  --mail-lane-low: #eff8f4;
+  --mail-lane-low-line: #d3e4de;
+  /* Navigation dock: clear glass over the page (see .glass-dock). Almost no fill and very
+     little blur, so what is behind stays sharp; the glass shows in its bright rim and a
+     hairline that outlines it on a white page. */
+  --glass-fill: rgba(255, 255, 255, 0.08);
+  --glass-blur: 1px;
+  --glass-edge: rgba(31, 28, 45, 0.1);
+  --glass-rim: rgba(255, 255, 255, 0.95);
+  --glass-rim-soft: rgba(255, 255, 255, 0.45);
+  --glass-inner-glow: rgba(255, 255, 255, 0.35);
+  --glass-shadow: 0 10px 30px rgba(31, 28, 45, 0.12), 0 1px 3px rgba(31, 28, 45, 0.08);
+  --glass-hover: rgba(255, 255, 255, 0.22);
+  --glass-lens: rgba(255, 255, 255, 0.3);
+  --glass-lens-tint: rgba(89, 68, 216, 0.1);
+  --glass-icon-shadow: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 1px rgba(255, 255, 255, 0.6));
 }
 
 :root:has([data-mail-theme="dark"]) {
@@ -39,6 +66,7 @@
   --mail-read-surface: #16151c;
   --mail-read-text: #9d97ab;
   --mail-paper-pad: 20px;
+  --mail-paper: #fff;
   --mail-line: #3c3849;
   --mail-line-strong: #888198;
   --mail-secondary: #c5bfd2;
@@ -55,6 +83,29 @@
   --mail-success: #a7e0c4;
   --mail-success-tint: #243d35;
   --mail-link: #a5c7ff;
+  --mail-glow-a: rgba(151, 132, 255, 0.1);
+  --mail-glow-b: rgba(123, 202, 255, 0.05);
+  --mail-header: rgba(32, 30, 41, 0.78);
+  --mail-lane-urgent: #2a1d25;
+  --mail-lane-urgent-line: #4d2f3a;
+  --mail-lane-fyi: #2a251c;
+  --mail-lane-fyi-line: #4b3f2a;
+  --mail-lane-low: #1b2924;
+  --mail-lane-low-line: #2e463d;
+  /* A dark dimming layer, like Apple's clear glass: on the dark page it is barely visible,
+     but over a white email it keeps the light icons readable. */
+  --glass-fill: rgba(18, 16, 26, 0.42);
+  --glass-blur: 1px;
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-rim: rgba(255, 255, 255, 0.5);
+  --glass-rim-soft: rgba(255, 255, 255, 0.16);
+  --glass-inner-glow: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --glass-hover: rgba(255, 255, 255, 0.08);
+  --glass-lens: rgba(255, 255, 255, 0.1);
+  --glass-lens-tint: rgba(195, 183, 255, 0.12);
+  /* Light icons need a dark outline to stay visible where the glass passes over a white email. */
+  --glass-icon-shadow: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.9)) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.55));
 }
 
 @theme inline {
@@ -81,7 +132,14 @@
   --color-mail-success: var(--mail-success);
   --color-mail-success-tint: var(--mail-success-tint);
   --color-mail-link: var(--mail-link);
-  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-mail-header: var(--mail-header);
+  --color-mail-lane-urgent: var(--mail-lane-urgent);
+  --color-mail-lane-urgent-line: var(--mail-lane-urgent-line);
+  --color-mail-lane-fyi: var(--mail-lane-fyi);
+  --color-mail-lane-fyi-line: var(--mail-lane-fyi-line);
+  --color-mail-lane-low: var(--mail-lane-low);
+  --color-mail-lane-low-line: var(--mail-lane-low-line);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, "Segoe UI", Arial, sans-serif;
   --font-mono: "Cascadia Code", Consolas, monospace;
 }
 
@@ -95,8 +153,80 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, "Segoe UI", Arial, sans-serif;
   margin: 0;
+}
+
+/* The page canvas: soft glows on the base background, as in the design preview. */
+.mail-canvas {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(circle at 13% 8%, var(--mail-glow-a), transparent 27rem),
+    radial-gradient(circle at 88% 13%, var(--mail-glow-b), transparent 25rem);
+}
+
+/* Account menu: drops in from the account button. */
+@keyframes account-menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
+.account-menu-in { animation: account-menu-in 0.16s ease-out; }
+@media (prefers-reduced-motion: reduce) { .account-menu-in { animation: none; } }
+
+/* Navigation dock as clear glass, after Apple's Liquid Glass: the page behind stays
+   sharp (a 1px blur that only softens it, plus a colour lift); the glass is drawn by
+   its edge: a bright specular rim strongest at the top-left, a faint inner glow along
+   the border, and a soft shadow underneath. Icons sit on the glass itself; only the
+   current page gets a lens-like capsule. */
+.glass-dock {
+  isolation: isolate;
+  background: var(--glass-fill);
+  border-color: var(--glass-edge);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%) brightness(1.04);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%) brightness(1.04);
+  box-shadow: inset 0 0 14px var(--glass-inner-glow), var(--glass-shadow);
+}
+/* Specular rim: a 1px gradient ring, bright at the top-left and bottom-right corners. */
+.glass-dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--glass-rim), var(--glass-rim-soft) 22%, transparent 50%, var(--glass-rim-soft) 80%, var(--glass-rim));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.glass-divider { background: var(--glass-rim-soft); }
+.glass-button { background: transparent; border-color: transparent; }
+.glass-button:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-rim-soft);
+}
+.glass-button-active {
+  background: linear-gradient(180deg, var(--glass-lens), var(--glass-lens-tint));
+  border-color: var(--glass-rim-soft);
+  box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 -1px 0 var(--glass-rim-soft), inset 0 0 10px var(--glass-inner-glow), 0 4px 12px rgba(89, 68, 216, 0.16);
+}
+/* Clear glass needs the icons to hold their own over any background. */
+.glass-dock .rail-button svg { filter: var(--glass-icon-shadow); }
+/* Without backdrop filters (older browsers) clear glass would be unreadable: use the solid bar. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-dock { background: var(--mail-header); }
+}
+
+/* Navigation rail: a small playful motion on hover, skipped for reduced motion. */
+@keyframes rail-pulse { 40% { transform: scale(1.14); } 70% { transform: scale(0.96); } }
+@keyframes rail-lift { 45% { transform: translateY(-2px); } 75% { transform: translateY(1px); } }
+@keyframes rail-turn { 40% { transform: rotate(-7deg) scale(0.94); } 70% { transform: rotate(3deg) scale(1.05); } }
+@keyframes rail-write { 35% { transform: translate(-2px, 2px) rotate(-7deg); } 70% { transform: translate(1px, -1px) rotate(3deg); } }
+.rail-button:hover .rail-icon-pulse { animation: rail-pulse 0.7s ease; }
+.rail-button:hover .rail-icon-lift { animation: rail-lift 0.65s ease; }
+.rail-button:hover .rail-icon-turn { animation: rail-turn 0.7s ease; }
+.rail-button:hover .rail-icon-write { animation: rail-write 0.65s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .rail-button:hover [class*="rail-icon-"] { animation: none; }
 }
 
 button,
