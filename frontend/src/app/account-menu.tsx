@@ -46,6 +46,8 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
 }) {
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Bumped after "Delete profile and personalization history", so the About-you form reloads empty.
+  const [aboutVersion, setAboutVersion] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
   const menuId = useId();
@@ -135,7 +137,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
         </div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
         {/* Mounted while Settings is open, so it always shows what is stored now. */}
-        {settingsOpen && <><AboutYouForm /><SummaryAnswers /></>}
+        {settingsOpen && <><AboutYouForm key={aboutVersion} /><SummaryAnswers onDeletedAll={() => setAboutVersion((version) => version + 1)} /></>}
       </dialog>
     </>
   );
