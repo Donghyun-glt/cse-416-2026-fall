@@ -8,6 +8,16 @@ function fallbackName(email: string) {
   return email.split("@")[0] || "Gmail user";
 }
 
+/**
+ * The photo the user set on their Google account, from the "profile" scope MailFlow already
+ * asks for. Only Google's own image host is accepted, and it is asked for at 192 px so the
+ * avatar stays sharp on high-density screens. Nothing is stored: the browser loads it directly.
+ */
+function profilePicture(value: string | null | undefined) {
+  if (!value || !/^https:\/\/[a-z0-9-]+\.googleusercontent\.com\//i.test(value)) return "";
+  return value.replace(/=s\d+(-c)?$/, "=s192-c");
+}
+
 function getHttpStatus(error: unknown) {
   if (!error || typeof error !== "object") return undefined;
   const value = error as { code?: unknown; response?: { status?: unknown } };
@@ -31,6 +41,7 @@ export async function GET(request: NextRequest) {
     const gmailProfile = await gmail.users.getProfile({ userId: "me" });
     const email = gmailProfile.data.emailAddress ?? "";
     let name = "";
+    let picture = "";
     let requiresProfileAuthorization = false;
     let grantedScopes = tokens.scope?.split(" ").filter(Boolean) ?? [];
 
@@ -48,6 +59,7 @@ export async function GET(request: NextRequest) {
       const oauth = google.oauth2({ version: "v2", auth: oauth2Client });
       const userInfo = await oauth.userinfo.get();
       name = userInfo.data.name?.trim() ?? "";
+      picture = profilePicture(userInfo.data.picture);
     } catch (profileScopeError) {
       // Sessions created before profile scope was added can still use Gmail's
       // email address and receive a stable local-part fallback name.
@@ -63,6 +75,7 @@ export async function GET(request: NextRequest) {
       connected: true,
       name: displayName,
       email,
+      picture,
       requiresProfileAuthorization,
       requiresMailboxAuthorization:
         grantedScopes.length > 0 && !grantedScopes.includes(GMAIL_MODIFY_SCOPE),
