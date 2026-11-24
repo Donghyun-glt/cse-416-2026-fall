@@ -124,6 +124,51 @@ export async function recordPriority(input: {
   });
 }
 
+/**
+ * First automatic priorities for a page of messages MailFlow has never seen, in one
+ * statement. A search or an older mailbox page can bring up to 50 such messages, and
+ * a recordPriority transaction for each (about six database round trips apiece) kept
+ * the list waiting for seconds or ran out of pool connections.
+ *
+ * A message that gained a priority in the meantime (a manual choice or an AI
+ * analysis) keeps it: rows that already exist are left alone and read back. Each new
+ * row gets its audit entry in priority_events, as recordPriority would write.
+ */
+export async function recordFirstAutomaticPriorities(userId: number, decisions: readonly {
+  gmailMessageId: string;
+  priority: Priority;
+  reason: string;
+  signals?: PrioritySignals;
+}[]) {
+  const saved = new Map<string, Priority>();
+  const unique = [...new Map(decisions.map((decision) => [decision.gmailMessageId, decision])).values()];
+  if (unique.length === 0) return saved;
+  const rows = JSON.stringify(unique.map((decision) => ({
+    id: decision.gmailMessageId, priority: decision.priority, reason: decision.reason, signals: decision.signals ?? null,
+  })));
+  const result = await query<{ gmail_message_id: string; priority: Priority }>(`
+    WITH input AS (
+      SELECT * FROM jsonb_to_recordset($2::jsonb) AS t(id TEXT, priority TEXT, reason TEXT, signals JSONB)
+    ), inserted AS (
+      INSERT INTO message_priorities (
+        user_id, gmail_message_id, priority, source, reason, signals,
+        classified_at, updated_at, last_seen_at
+      )
+      SELECT $1, id, priority, 'automatic', reason, signals, NOW(), NOW(), NOW() FROM input
+      ON CONFLICT (user_id, gmail_message_id) DO NOTHING
+      RETURNING gmail_message_id, priority, reason, signals
+    ), events AS (
+      INSERT INTO priority_events (user_id, gmail_message_id, previous_priority, new_priority, source, reason, signals)
+      SELECT $1, gmail_message_id, NULL, priority, 'automatic', reason, signals FROM inserted
+    )
+    SELECT gmail_message_id, priority FROM inserted
+  `, [userId, rows]);
+  for (const row of result.rows) saved.set(row.gmail_message_id, row.priority);
+  const existing = unique.filter((decision) => !saved.has(decision.gmailMessageId)).map((decision) => decision.gmailMessageId);
+  for (const [id, priority] of await getStoredPriorities(userId, existing)) saved.set(id, priority);
+  return saved;
+}
+
 export type StoredReplyDraft = {
   draft: string;
   model: string;

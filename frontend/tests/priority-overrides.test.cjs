@@ -30,3 +30,21 @@ test('choosing the existing label manually still protects future edits and prese
  assert.equal(db.current().source, 'manual'); assert.equal(db.history(), 1);
  assert.equal(await db.record({ userId: 1, gmailMessageId: 'm', priority: 'urgent', source: 'automatic', reason: 'AI' }), 'fyi');
 });
+test('a list page records every new priority in one bulk write, never one transaction per message', async () => {
+ const calls = { bulk: [], single: 0 };
+ const exported = {};
+ const source = fs.readFileSync(path.resolve(__dirname, '../src/lib/gmail-priority.ts'), 'utf8');
+ vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: exported, Map, require: (name) => name === './mail-priority'
+  ? { classifyPriorityWithReason: (message) => ({ priority: 'fyi', reason: `rule for ${message.id}`, signals: {} }) }
+  : {
+   getStoredPriorities: async () => new Map([['seen', 'urgent']]),
+   getStoredPriority: async () => null,
+   recordPriority: async () => { calls.single++; },
+   // 'raced' got a manual priority between the read and the write; the stored one wins.
+   recordFirstAutomaticPriorities: async (userId, decisions) => { calls.bulk.push(decisions.map((decision) => decision.gmailMessageId)); return new Map([['new', 'fyi'], ['raced', 'low']]); },
+  } });
+ const priorities = await exported.getOrAssignPriorities([{ id: 'seen' }, { id: 'new' }, { id: 'raced' }], 1);
+ assert.deepEqual(calls.bulk.map((ids) => [...ids]), [['new', 'raced']]);
+ assert.equal(calls.single, 0);
+ assert.deepEqual(Object.fromEntries(priorities), { seen: 'urgent', new: 'fyi', raced: 'low' });
+});
