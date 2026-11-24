@@ -16,7 +16,15 @@ import { MailDetail, formatSender, initials, type Mail, type SavedDraft } from "
 import { SearchBar, matchesSummarySearch } from "./search-bar";
 import { Avatar, SectionHead, chip, panel, panelPad, primaryButton, textButton } from "./ui";
 
-type MailResponse = { connected?: boolean; pending?: string[]; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number };
+type MailResponse = { connected?: boolean; pending?: string[]; messages?: Mail[]; error?: string; nextPageToken?: string; resultSizeEstimate?: number; historyId?: string };
+
+// Auto-sync: every 15 s the list asks whether Gmail changed (one small request) and reloads only
+// if it did; at least every 2 minutes it reloads anyway. Summary also depends on MailFlow's own
+// to-dos, which Gmail's history does not show, so it reloads every minute. Nothing runs while
+// the browser tab is hidden; showing it again syncs at once.
+const SYNC_MS = 15_000;
+const SUMMARY_SYNC_MS = 60_000;
+const FULL_SYNC_MS = 2 * 60_000;
 type UserProfile = { name: string; email: string; picture?: string };
 type ProfileResponse = Partial<UserProfile> & { requiresProfileAuthorization?: boolean; requiresMailboxAuthorization?: boolean };
 // One entry per screen the browser's Back button should return to.
@@ -190,6 +198,10 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   const listCacheRef = useRef(new Map<string, CachedList>());
   /** The cache key of the list on screen, or null while another list is loading. */
   const shownListKeyRef = useRef<string | null>(null);
+  /** Gmail's history position when the list on screen was loaded (null: reload on the next sync). */
+  const historyIdRef = useRef<string | null>(null);
+  const lastFullSyncRef = useRef(0);
+  const loadedDayRef = useRef(0);
   const bodyCacheRef = useRef(new Map<string, Pick<Mail, "html" | "attachments">>());
   const historyHandlerRef = useRef<(state: HistoryState, loadedMessages?: Mail[]) => void>(() => {});
   const pendingHistoryRef = useRef<HistoryState | null>(null);
@@ -230,6 +242,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
     requestRef.current = controller;
     const key = listKey(targetView, pageToken, onlyAttachments, onlyUnread, mailboxSearch);
     const cached = listCacheRef.current.get(key);
+    historyIdRef.current = null; // set again when this load succeeds
     if (showLoading && cached) {
       // Seen before: show it now, then refresh it quietly like the periodic sync does.
       showCachedList(key, cached);
@@ -263,6 +276,9 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
       setConnected(true);
       rememberList(key, { messages: nextMessages, pending: data.pending ?? [], nextPageToken: data.nextPageToken ?? null, resultSizeEstimate: data.resultSizeEstimate ?? 0 });
       shownListKeyRef.current = key;
+      historyIdRef.current = data.historyId ?? null;
+      lastFullSyncRef.current = Date.now();
+      loadedDayRef.current = startOfToday();
       setMessages(nextMessages);
       if (showLoading) {
         setSelectedIds(new Set());
@@ -347,14 +363,34 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   useEffect(() => {
     if (!connected || view === "calendar") return;
     const pageToken = view === "briefing" ? "" : allPageTokens[allPageIndex];
-    const syncCurrentMailbox = () => {
-      if (requestRef.current) return;
+    let stopped = false;
+    let checking = false;
+    const syncCurrentMailbox = async () => {
+      if (requestRef.current || checking || document.visibilityState === "hidden") return;
+      const since = historyIdRef.current;
+      const recent = Date.now() - lastFullSyncRef.current < FULL_SYNC_MS;
+      const sameDay = view !== "briefing" || loadedDayRef.current === startOfToday();
+      if (view !== "summary" && since && recent && sameDay) {
+        checking = true;
+        try {
+          const response = await fetch(`/api/gmail/messages/changes?since=${encodeURIComponent(since)}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+          const data = await response.json().catch(() => ({})) as { changed?: boolean; historyId?: string };
+          if (response.ok && data.changed === false) {
+            // Nothing new: keep the list, remember the newer position.
+            if (historyIdRef.current === since && data.historyId) historyIdRef.current = data.historyId;
+            return;
+          }
+        } catch {
+          // Network trouble: reload the list instead, as before.
+        } finally { checking = false; }
+        if (stopped || requestRef.current) return;
+      }
       void loadMessages(view, false, pageToken);
     };
-    const interval = window.setInterval(syncCurrentMailbox, view === "summary" ? 60_000 : 15_000);
-    const refreshWhenVisible = () => { if (document.visibilityState === "visible") syncCurrentMailbox(); };
+    const interval = window.setInterval(() => void syncCurrentMailbox(), view === "summary" ? SUMMARY_SYNC_MS : SYNC_MS);
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void syncCurrentMailbox(); };
     document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => { window.clearInterval(interval); document.removeEventListener("visibilitychange", refreshWhenVisible); };
+    return () => { stopped = true; window.clearInterval(interval); document.removeEventListener("visibilitychange", refreshWhenVisible); };
   }, [allPageIndex, allPageTokens, connected, loadMessages, view]);
 
   const fullDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());

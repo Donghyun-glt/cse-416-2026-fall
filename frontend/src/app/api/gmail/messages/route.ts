@@ -118,6 +118,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ connected: true, ...await loadSummary(gmail, userId) });
     }
 
+    // The mailbox's current history position, requested just before the list. The browser
+    // later asks /api/gmail/messages/changes whether anything happened since then, and only
+    // reloads the list when something did (and in any case every 2 minutes, which also covers
+    // a change landing between this request and the list). A failure only means the browser
+    // reloads the list on its next sync, as it always used to.
+    const historyIdPromise = Promise.resolve()
+      .then(() => gmail.users.getProfile({ userId: "me", fields: "historyId" }))
+      .then((profile) => profile.data.historyId ?? undefined)
+      .catch(() => undefined);
+
     const messageIds: string[] = [];
     let pageToken = requestedPageToken;
     let nextPageToken: string | undefined;
@@ -180,7 +190,7 @@ export async function GET(request: NextRequest) {
       userId,
     );
 
-    const draftThreads = await draftThreadsPromise;
+    const [draftThreads, historyId] = await Promise.all([draftThreadsPromise, historyIdPromise]);
 
     const filteredMessages = fetched.flatMap((data) => {
       const receivedAt = Number(data.internalDate ?? 0);
@@ -198,6 +208,7 @@ export async function GET(request: NextRequest) {
       messages: isDailyBriefing ? filteredMessages.sort(comparePriority) : filteredMessages,
       nextPageToken: !isDailyBriefing ? nextPageToken : undefined,
       resultSizeEstimate: !isDailyBriefing ? resultSizeEstimate : undefined,
+      historyId,
     });
   } catch (gmailError) {
     console.error("Gmail API request failed", gmailError);
