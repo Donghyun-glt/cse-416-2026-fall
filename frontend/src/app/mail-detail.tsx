@@ -7,6 +7,7 @@ import type { ReplyLength, ReplyTone } from "@/lib/reply-draft";
 import { CalendarSuggestions } from "./calendar-suggestions";
 import { initials } from "@/lib/initials";
 import { Avatar, Eyebrow, field, primaryButton, secondaryButton, textButton } from "./ui";
+import { RefractionFilter, refractionStyle, useEdgeRefraction } from "./liquid-glass";
 import { COMPOSER_FONTS, EDITOR_CONTENT_CLASS, FormatToolbar } from "./format-toolbar";
 
 /** A message's place on the Summary tab, decided separately from its priority label. */
@@ -246,10 +247,27 @@ function EmailBody({ html, inert, onReady, placeholder }: { html: string; inert?
   const [measured, setMeasured] = useState(false);
   const onReadyRef = useRef(onReady);
   useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
+  // An email laid out for a wider screen (a 600 px newsletter on a phone) is scaled down to
+  // the frame's width instead of being cut off at its right edge.
+  const fitWidth = useCallback(() => {
+    const frame = frameRef.current;
+    const root = frame?.contentDocument?.documentElement;
+    if (!frame || !root) return;
+    root.style.zoom = "";
+    const natural = root.scrollWidth;
+    const available = frame.clientWidth;
+    if (available > 0 && natural > available + 1) root.style.zoom = String(available / natural);
+  }, []);
   const syncHeight = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
-    if (doc) setHeight(Math.max(60, doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0));
-  }, []);
+    if (!doc) return;
+    fitWidth();
+    const root = doc.documentElement;
+    // A scaled-down email is as tall as it is drawn; scrollHeight would never drop below the
+    // frame's current height and leave a gap under the message.
+    if (root?.style.zoom) setHeight(Math.max(60, Math.ceil(root.getBoundingClientRect().height)));
+    else setHeight(Math.max(60, root?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0));
+  }, [fitWidth]);
   const handleLoad = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
     // Ignore the empty page a new iframe starts with; wait for the message itself.
@@ -259,6 +277,8 @@ function EmailBody({ html, inert, onReady, placeholder }: { html: string; inert?
     observerRef.current?.disconnect();
     observerRef.current = new ResizeObserver(syncHeight);
     observerRef.current.observe(doc.body);
+    // The frame's own width changes too (window resize, phone rotation).
+    if (frameRef.current) observerRef.current.observe(frameRef.current);
     // Late-loading inline images change the height after onLoad.
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", syncHeight));
   }, [syncHeight]);
@@ -479,6 +499,20 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
   const [replyAll, setReplyAll] = useState(false);
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Phones: the AI insights card starts folded, and the AI reply opens as a bottom sheet.
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [replySheetOpen, setReplySheetOpen] = useState(false);
+  // The phone action bar is the same Liquid Glass as the docks, with its own refraction map.
+  const actionBar = useRef<HTMLDivElement>(null);
+  const actionBarRefraction = useEdgeRefraction(actionBar);
+  useEffect(() => {
+    if (!replySheetOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setReplySheetOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", onKey); };
+  }, [replySheetOpen]);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -977,11 +1011,11 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       onMouseDownCapture={(event) => { if (settling && event.detail > 1) event.preventDefault(); }}>
       {/* ---------- Top action toolbar ---------- */}
       {/* The message scrolls under this bar, so it keeps a page-coloured backing to stay readable. */}
-      <div className="sticky top-0 z-20 mb-6 flex h-12 shrink-0 items-center border-b border-mail-line bg-background/85 pr-1 backdrop-blur-md">
+      <div className="sticky top-0 z-20 mb-6 flex h-12 shrink-0 items-center border-b border-mail-line bg-background/85 pr-1 backdrop-blur-md max-sm:-mx-[clamp(14px,5vw,80px)] max-sm:-mt-4 max-sm:mb-4 max-sm:h-[calc(56px+env(safe-area-inset-top))] max-sm:bg-mail-header max-sm:px-2 max-sm:pt-[env(safe-area-inset-top)] max-sm:backdrop-blur-xl">
         <button type="button" onClick={onBack} className={`${textButton} shrink-0`}><span aria-hidden="true">←</span><span className="hidden sm:inline">{backLabel}</span><span className="sm:hidden">Back</span></button>
         <span className="ml-3 flex items-center border-l border-mail-line pl-2">
-          {onArchive && <ToolbarButton icon="archive" label="Archive" onClick={onArchive} className="hidden sm:flex" />}
-          {onSpam && <ToolbarButton icon="spam" label="Report spam" onClick={onSpam} className="hidden sm:flex" />}
+          {onArchive && <ToolbarButton icon="archive" label="Archive" onClick={onArchive} />}
+          {onSpam && <ToolbarButton icon="spam" label="Report spam" onClick={onSpam} />}
           {onNotSpam && <button type="button" onClick={onNotSpam} className="mx-1 h-8 rounded-full border border-mail-line-strong px-3 text-xs font-medium text-mail-secondary hover:bg-mail-muted-surface">Not spam</button>}
           {onDelete && <ToolbarButton icon="trash" label="Delete" onClick={onDelete} disabled={deleting} />}
           {onMarkUnread && <><Divider /><ToolbarButton icon="unread" label="Mark as unread" onClick={onMarkUnread} /></>}
@@ -994,7 +1028,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
         </span>
       </div>
 
-      <div className={`flex-1 lg:items-start ${showAiPanel ? "lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)] lg:gap-10" : ""}`}>
+      <div className={`flex-1 max-sm:flex max-sm:flex-col lg:items-start ${showAiPanel ? "lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)] lg:gap-10" : ""}`}>
       <div className="min-w-0">
         {error && <p role="alert" className="mb-4 rounded-[10px] border border-mail-danger-line bg-mail-danger-tint px-4 py-3 text-[13px] text-mail-danger">{error}</p>}
 
@@ -1201,7 +1235,7 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
             navigation dock stays fixed on screen). Reply here always opens a blank composer,
             independent of the AI suggestion. ---------- */}
         {!composeMode && (!message.draft || onDelete) && (
-          <div className="mt-8 border-t border-mail-line">
+          <div className="mt-8 border-t border-mail-line max-sm:hidden">
             <div className="flex flex-wrap items-center gap-2 pt-5 sm:gap-3">
               {!message.draft && <button type="button" onClick={() => openComposer("reply")} className={pillClass}><GIcon name="reply" />Reply</button>}
               {canReplyAll && <button type="button" onClick={() => openComposer("replyAll")} className={pillClass}><GIcon name="replyAll" />Reply all</button>}
@@ -1219,9 +1253,26 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
       {/* ---------- Right column: AI reply panel ---------- */}
       {showAiPanel && (
-        <aside className="mt-10 space-y-8 border-t border-mail-line pt-8 lg:sticky lg:top-16 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
-          <CalendarSuggestions messageId={message.id} onAnalyzedPriority={onAnalyzedPriority} />
-          <div className="border-t border-mail-line pt-8">
+        <aside className="mt-10 space-y-8 border-t border-mail-line pt-8 max-sm:contents lg:sticky lg:top-16 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
+          {/* Phones: a folded card above the message; "Show more" opens it. */}
+          <div className={`relative max-sm:order-first max-sm:mb-5 max-sm:rounded-[17px] max-sm:border max-sm:border-mail-line max-sm:bg-mail-surface max-sm:p-4 ${insightsOpen ? "max-sm:pb-12" : "max-sm:max-h-[170px] max-sm:overflow-hidden"}`}>
+            <CalendarSuggestions messageId={message.id} onAnalyzedPriority={onAnalyzedPriority} />
+            <div className={`absolute inset-x-0 bottom-0 flex justify-center rounded-b-[17px] pb-2.5 pt-8 sm:hidden ${insightsOpen ? "" : "bg-gradient-to-t from-mail-surface via-mail-surface/95 to-transparent"}`}>
+              <button type="button" onClick={() => setInsightsOpen((open) => !open)} aria-expanded={insightsOpen} className="rounded-full border border-mail-line bg-mail-surface px-3.5 py-1.5 text-xs font-bold text-mail-accent shadow-[0_2px_8px_rgba(39,37,32,0.08)]">
+                {insightsOpen ? "Show less ▴" : "Show more ▾"}
+              </button>
+            </div>
+          </div>
+          {/* Phones: a sheet that slides up from the bottom when "AI reply" is tapped. */}
+          {replySheetOpen && <div className="sheet-backdrop fixed inset-0 z-[55] bg-[#15121e]/45 sm:hidden" onClick={() => setReplySheetOpen(false)} aria-hidden="true" />}
+          <div role={replySheetOpen ? "dialog" : undefined} aria-modal={replySheetOpen || undefined} aria-label={replySheetOpen ? "AI reply" : undefined}
+            className={`border-t border-mail-line pt-8 ${replySheetOpen
+              ? "mobile-sheet max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-[60] max-sm:max-h-[88dvh] max-sm:overflow-y-auto max-sm:rounded-t-[22px] max-sm:bg-mail-surface max-sm:px-4 max-sm:pb-[calc(16px+env(safe-area-inset-bottom))] max-sm:pt-2 max-sm:shadow-[0_-12px_40px_rgba(21,17,26,0.22)]"
+              : "max-sm:hidden"}`}>
+            <div className="sm:hidden">
+              <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-mail-line-strong/40" aria-hidden="true" />
+              <button type="button" onClick={() => setReplySheetOpen(false)} aria-label="Close AI reply" className="absolute right-3 top-3 grid size-8 place-items-center rounded-full text-mail-secondary hover:bg-mail-muted-surface"><GIcon name="close" className="h-4 w-4" /></button>
+            </div>
             <Eyebrow className="flex items-center gap-1.5">✦ Suggested reply
               {suggestion.status === "ready" && <span className="font-semibold normal-case tracking-normal text-mail-muted">{suggestion.cached ? "· saved" : "· just generated"}</span>}
             </Eyebrow>
@@ -1307,8 +1358,27 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
       )}
       </div>
 
+      {/* Phones: reply actions in a bar fixed to the bottom (drafts have none; the composer replaces it). */}
+      {!composeMode && !message.draft && <RefractionFilter id="mailflow-actionbar-refraction" map={actionBarRefraction} />}
+      {!composeMode && !message.draft && (
+        <div ref={actionBar} style={refractionStyle("mailflow-actionbar-refraction", actionBarRefraction)}
+          className="glass-dock fixed inset-x-3 bottom-[calc(10px+env(safe-area-inset-bottom))] z-40 grid auto-cols-fr grid-flow-col rounded-[26px] border p-1 sm:hidden">
+          {([
+            ["reply", "Reply", () => openComposer("reply"), true],
+            ["replyAll", "Reply all", () => openComposer("replyAll"), canReplyAll],
+            ["forward", "Forward", () => openComposer("forward"), true],
+            ["sparkle", "AI reply", () => setReplySheetOpen(true), showAiPanel],
+          ] as const).filter(([, , , shown]) => shown).map(([icon, label, onClick]) => (
+            <button key={label} type="button" onClick={onClick}
+              className={`glass-label flex h-[54px] flex-col items-center justify-center gap-0.5 text-[10.5px] font-bold ${icon === "sparkle" ? "text-mail-accent" : "text-foreground"}`}>
+              <GIcon name={icon} className="glass-icon h-5 w-5" />{label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {toast && (
-        <div role="status" className="fixed bottom-20 left-4 z-50 flex items-center gap-6 rounded-[10px] border border-mail-line bg-mail-surface px-4 py-3 text-[13px] font-semibold text-foreground shadow-[0_8px_24px_rgba(39,37,32,0.14)] sm:bottom-[100px] sm:left-6">
+        <div role="status" className="fixed bottom-20 left-4 z-50 max-sm:bottom-[calc(84px+env(safe-area-inset-bottom))] flex items-center gap-6 rounded-[10px] border border-mail-line bg-mail-surface px-4 py-3 text-[13px] font-semibold text-foreground shadow-[0_8px_24px_rgba(39,37,32,0.14)] sm:bottom-[100px] sm:left-6">
           {toast}
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss" className="text-mail-muted hover:text-foreground"><GIcon name="close" className="h-4 w-4" /></button>
         </div>

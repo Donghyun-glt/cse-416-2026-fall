@@ -54,6 +54,7 @@
   --glass-lens: rgba(255, 255, 255, 0.3);
   --glass-lens-tint: rgba(89, 68, 216, 0.1);
   --glass-icon-shadow: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 1px rgba(255, 255, 255, 0.6));
+  --glass-label-shadow: 0 0 2px rgba(255, 255, 255, 0.95), 0 0 6px rgba(255, 255, 255, 0.75);
 }
 
 :root:has([data-mail-theme="dark"]) {
@@ -106,6 +107,7 @@
   --glass-lens-tint: rgba(195, 183, 255, 0.12);
   /* Light icons need a dark outline to stay visible where the glass passes over a white email. */
   --glass-icon-shadow: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.9)) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.55));
+  --glass-label-shadow: 0 0 2px rgba(0, 0, 0, 0.9), 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 @theme inline {
@@ -165,6 +167,15 @@ body {
     radial-gradient(circle at 88% 13%, var(--mail-glow-b), transparent 25rem);
 }
 
+/* Phone bottom sheets: the panel slides up over a fading backdrop. */
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes sheet-fade { from { opacity: 0; } }
+.sheet-panel { animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.sheet-backdrop { animation: sheet-fade 0.2s ease-out; }
+/* A panel that is a sheet only on phones (the AI reply in a message). */
+@media (max-width: 639px) { .mobile-sheet { animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); } }
+@media (prefers-reduced-motion: reduce) { .sheet-panel, .sheet-backdrop, .mobile-sheet { animation: none; } }
+
 /* Account menu: drops in from the account button. */
 @keyframes account-menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
 .account-menu-in { animation: account-menu-in 0.16s ease-out; }
@@ -210,7 +221,9 @@ body {
   box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 -1px 0 var(--glass-rim-soft), inset 0 0 10px var(--glass-inner-glow), 0 4px 12px rgba(89, 68, 216, 0.16);
 }
 /* Clear glass needs the icons to hold their own over any background. */
-.glass-dock .rail-button svg { filter: var(--glass-icon-shadow); }
+.glass-dock .rail-button svg, .glass-dock .glass-icon { filter: var(--glass-icon-shadow); }
+/* Tab names on the phone docks get the same halo, so text scrolling behind does not blend in. */
+.glass-dock .glass-label { text-shadow: var(--glass-label-shadow); }
 /* Without backdrop filters (older browsers) clear glass would be unreadable: use the solid bar. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass-dock { background: var(--mail-header); }

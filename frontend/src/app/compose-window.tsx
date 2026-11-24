@@ -249,10 +249,12 @@ export function ComposeWindow({ initial, onClose, onSent, closeRequest = 0, send
   const row = "flex items-center gap-2 border-b border-mail-line px-4 text-sm";
   const input = "min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-mail-muted";
   return (
-    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-[17px] border border-mail-line bg-mail-surface shadow-[0_25px_70px_rgba(21,17,26,0.27)] sm:bottom-[92px] sm:right-6 sm:rounded-[17px] ${minimized ? "sm:w-[300px]" : "max-h-[90vh] sm:max-h-[calc(100vh-116px)] sm:w-[620px]"}`}>
-      <header className="flex h-12 shrink-0 cursor-pointer items-center gap-1 border-b border-mail-line pl-4 pr-1.5 text-foreground" onClick={() => setMinimized((value) => !value)}>
+    <section aria-label="New message" className={`fixed bottom-0 right-0 z-50 flex w-full flex-col overflow-hidden rounded-t-[17px] border border-mail-line bg-mail-surface shadow-[0_25px_70px_rgba(21,17,26,0.27)] max-sm:inset-0 max-sm:rounded-none max-sm:border-0 max-sm:pb-[env(safe-area-inset-bottom)] max-sm:pt-[env(safe-area-inset-top)] sm:bottom-[92px] sm:right-6 sm:rounded-[17px] ${minimized ? "sm:w-[300px]" : "max-h-[90vh] max-sm:max-h-none sm:max-h-[calc(100vh-116px)] sm:w-[620px]"}`}>
+      {/* On phones the window fills the screen; it does not minimize there, and Send sits in this bar. */}
+      <header className="flex h-12 shrink-0 cursor-pointer items-center gap-1 border-b border-mail-line pl-4 pr-1.5 text-foreground max-sm:h-14 max-sm:cursor-default" onClick={() => { if (!window.matchMedia("(max-width: 639px)").matches) setMinimized((value) => !value); }}>
         <span className="min-w-0 flex-1 truncate"><span className="mr-2 text-[11px] font-extrabold uppercase tracking-[0.12em] text-mail-accent">New message</span><span className="text-[13px] font-bold">{subject.trim()}</span></span>
-        <button type="button" onClick={(event) => { event.stopPropagation(); setMinimized((value) => !value); }} aria-label={minimized ? "Expand" : "Minimize"} title={minimized ? "Expand" : "Minimize"} className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-mail-secondary hover:bg-mail-hover">{minimized ? "▴" : "–"}</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); void send(); }} disabled={!canSend} className={`${primaryButton} mr-1 h-9 px-4 py-0 sm:hidden`}>{sending ? "Sending…" : "Send"}</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); setMinimized((value) => !value); }} aria-label={minimized ? "Expand" : "Minimize"} title={minimized ? "Expand" : "Minimize"} className="flex h-8 w-8 items-center justify-center rounded text-lg leading-none text-mail-secondary hover:bg-mail-hover max-sm:hidden">{minimized ? "▴" : "–"}</button>
         <button type="button" onClick={(event) => { event.stopPropagation(); void close(); }} aria-label="Save and close" title="Save & close" className="flex h-8 w-8 items-center justify-center rounded text-mail-secondary hover:bg-mail-hover"><GIcon name="close" className="h-4 w-4" /></button>
       </header>
       {/* Hidden, not unmounted, while minimized so the text and formatting survive. */}
@@ -325,7 +327,7 @@ export function ComposeWindow({ initial, onClose, onSent, closeRequest = 0, send
         )}
         {error && <p role="alert" className="mx-4 mb-3 rounded bg-mail-danger-tint px-3 py-2 text-xs text-mail-danger">{error}</p>}
 
-        <FormatToolbar editorRef={editorRef} onChange={syncBody} className="mx-4 mb-2" />
+        <FormatToolbar editorRef={editorRef} onChange={syncBody} className="mx-4 mb-2 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none]" />
 
         <div className="flex items-center gap-3 px-4 pb-3 pt-1">
           <button type="button" onClick={() => void send()} disabled={!canSend} className={`${primaryButton} h-9 px-6 py-0`}>{sending ? "Sending…" : "Send"}</button>

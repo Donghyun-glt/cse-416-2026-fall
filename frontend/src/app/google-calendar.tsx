@@ -108,10 +108,12 @@ export function GoogleCalendar() {
           const items = dayEvents(date);
           return <button key={current} type="button" aria-pressed={current === selected}
             onClick={() => { setSelected(current); if (date.getMonth() !== month.getMonth()) setMonth(new Date(date.getFullYear(), date.getMonth(), 1)); }}
-            className={`flex min-h-[70px] flex-col justify-start overflow-hidden border-b border-r border-mail-line p-[3px] text-left text-xs transition hover:bg-mail-muted-surface sm:min-h-[105px] sm:p-[9px] ${date.getMonth() === month.getMonth() ? "bg-mail-surface" : "bg-mail-muted-surface text-mail-muted"} ${current === selected ? "ring-2 ring-inset ring-mail-accent" : ""}`}>
+            className={`flex min-h-[70px] flex-col justify-start overflow-hidden border-b border-r border-mail-line p-[3px] max-sm:min-h-[54px] max-sm:items-center text-left text-xs transition hover:bg-mail-muted-surface sm:min-h-[105px] sm:p-[9px] ${date.getMonth() === month.getMonth() ? "bg-mail-surface" : "bg-mail-muted-surface text-mail-muted"} ${current === selected ? "ring-2 ring-inset ring-mail-accent" : ""}`}>
             <span className={`inline-flex h-6 min-w-6 self-start items-center justify-center rounded-full px-1.5 ${current === todayKey ? "bg-[#5944d8] font-bold text-white" : ""}`}>{date.getDate()}</span>
-            {items.slice(0, 2).map((item, i) => <small key={`${item.id}-${i}`} className="mt-1.5 block truncate rounded-[5px] bg-mail-accent-tint px-[5px] py-[3px] text-[8px] leading-[1.3] text-mail-accent sm:mt-2.5 sm:p-[5px] sm:text-[10px]">{item.title}</small>)}
-            {items.length > 2 && <span className="mt-1 block text-[10px] text-mail-muted">+{items.length - 2} more</span>}
+            {items.slice(0, 2).map((item, i) => <small key={`${item.id}-${i}`} className="mt-1.5 block truncate rounded-[5px] bg-mail-accent-tint px-[5px] py-[3px] text-[8px] leading-[1.3] text-mail-accent max-sm:hidden sm:mt-2.5 sm:p-[5px] sm:text-[10px]">{item.title}</small>)}
+            {items.length > 2 && <span className="mt-1 block text-[10px] text-mail-muted max-sm:hidden">+{items.length - 2} more</span>}
+            {/* Phones: one dot per event (up to three); the list below the month names them. */}
+            {items.length > 0 && <span className="mt-1.5 flex gap-[3px] sm:hidden" aria-label={`${items.length} event${items.length === 1 ? "" : "s"}`}>{items.slice(0, 3).map((item, i) => <span key={`${item.id}-${i}`} className="size-[5px] rounded-full bg-mail-accent" />)}</span>}
           </button>;
         })}
       </div>

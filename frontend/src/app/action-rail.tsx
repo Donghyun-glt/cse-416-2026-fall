@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useRef, type ReactNode } from "react";
+import { RefractionFilter, refractionStyle, useEdgeRefraction } from "./liquid-glass";
 
 export type MailView = "briefing" | "summary" | "calendar" | "inbox" | "all" | "starred" | "sent" | "drafts" | "spam" | "trash";
 
@@ -28,106 +29,18 @@ const items: RailItem[][] = [
   ],
 ];
 
-// ---------------------------------------------------------------------------
-// Edge refraction (Liquid Glass): the page behind the dock bends near its rim, so
-// content scrolling underneath warps as it passes the edge. Done with an SVG
-// displacement filter used as a backdrop filter, which only Chromium browsers
-// (Chrome, Edge) support; elsewhere the dock keeps its plain clear glass.
-// ---------------------------------------------------------------------------
 
-const REFRACTION_ID = "mailflow-dock-refraction";
-/** How far in from the rim the glass bends the view, in CSS pixels. */
-const BEZEL = 16;
-/** Largest shift at the very rim, in CSS pixels. Kept below BEZEL so the rim bends the
- *  view instead of repeating text from further in. */
-const MAX_SHIFT = 10;
-
-type RefractionMap = { href: string; width: number; height: number };
-
-function supportsBackdropRefraction() {
-  const brands = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } }).userAgentData?.brands ?? [];
-  return brands.some(({ brand }) => brand === "Chromium") && CSS.supports("backdrop-filter", "blur(1px)");
-}
-
-/**
- * A displacement map for a rounded rectangle: neutral grey (no shift) in the middle,
- * and within BEZEL of the rim a shift that grows towards the edge and points inwards,
- * so the rim shows the page from a little further in, as a lens edge would.
- * Red carries the horizontal shift, green the vertical one.
- */
-function drawRefractionMap(width: number, height: number, radius: number): string {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) return "";
-  const image = context.createImageData(width, height);
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
-  const r = Math.min(radius, halfWidth, halfHeight);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const px = x + 0.5 - halfWidth;
-      const py = y + 0.5 - halfHeight;
-      // Signed distance to the rounded rectangle (negative inside).
-      const qx = Math.abs(px) - (halfWidth - r);
-      const qy = Math.abs(py) - (halfHeight - r);
-      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-      const distance = outside + Math.min(Math.max(qx, qy), 0) - r;
-      const depth = -distance;
-      let dx = 0;
-      let dy = 0;
-      if (depth > 0 && depth < BEZEL) {
-        // Outward normal of the nearest edge (or corner).
-        let nx: number;
-        let ny: number;
-        if (qx > 0 && qy > 0) { nx = Math.sign(px) * qx / (outside || 1); ny = Math.sign(py) * qy / (outside || 1); }
-        else if (qx > qy) { nx = Math.sign(px); ny = 0; }
-        else { nx = 0; ny = Math.sign(py); }
-        const strength = (1 - depth / BEZEL) ** 2;
-        dx = -nx * strength;
-        dy = -ny * strength;
-      }
-      const index = (y * width + x) * 4;
-      image.data[index] = Math.round(128 + dx * 127);
-      image.data[index + 1] = Math.round(128 + dy * 127);
-      image.data[index + 2] = 128;
-      image.data[index + 3] = 255;
-    }
-  }
-  context.putImageData(image, 0, 0);
-  return canvas.toDataURL();
-}
-
-/** Keeps a refraction map sized to the dock, or null where the browser cannot use it. */
-function useEdgeRefraction(dock: RefObject<HTMLElement | null>) {
-  const [map, setMap] = useState<RefractionMap | null>(null);
-  useEffect(() => {
-    const element = dock.current;
-    if (!element || !supportsBackdropRefraction()) return;
-    let drawn = "";
-    // The observer also reports the starting size, so this draws the first map too.
-    const observer = new ResizeObserver(() => {
-      const { width, height } = element.getBoundingClientRect();
-      const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
-      const w = Math.round(width);
-      const h = Math.round(height);
-      const key = `${w}x${h}r${radius}`;
-      if (!w || !h || key === drawn) return;
-      drawn = key;
-      setMap({ href: drawRefractionMap(w, h, radius), width: w, height: h });
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [dock]);
-  return map;
-}
+/** The icon and name of each page, shared with the phone tab bar. */
+export const viewIcons = Object.fromEntries(items.flat().map((item) => [item.key, item.icon])) as Record<MailView | "compose", ReactNode>;
+export const viewLabels = Object.fromEntries(items.flat().map((item) => [item.key, item.label])) as Record<MailView | "compose", string>;
 
 /**
  * Navigation as a dock of icon buttons fixed at the bottom centre of the screen, so it
- * stays in place while the page scrolls (a full-width bar on phones). Each button
+ * stays in place while the page scrolls. Phones use MobileTabBar instead. Each button
  * names itself in a tooltip above it on hover or keyboard focus.
  */
+const REFRACTION_ID = "mailflow-dock-refraction";
+
 export function ActionRail({ view, onSelect, onCompose, composeOpen = false }: {
   view: MailView;
   onSelect: (view: MailView) => void;
@@ -139,18 +52,9 @@ export function ActionRail({ view, onSelect, onCompose, composeOpen = false }: {
   const refraction = useEdgeRefraction(dock);
   return (
     <>
-    {refraction && (
-      <svg width="0" height="0" className="pointer-events-none absolute" aria-hidden="true">
-        <filter id={REFRACTION_ID} x="0" y="0" width={refraction.width} height={refraction.height} filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
-          <feImage href={refraction.href} x="0" y="0" width={refraction.width} height={refraction.height} preserveAspectRatio="none" result="map" />
-          <feDisplacementMap in="SourceGraphic" in2="map" scale={MAX_SHIFT * 2} xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </svg>
-    )}
-    <nav ref={dock} aria-label="Mailbox"
-      // The refraction runs first, then the same light blur and colour lift as the plain glass.
-      style={refraction ? { backdropFilter: `url(#${REFRACTION_ID}) blur(var(--glass-blur)) saturate(180%) brightness(1.04)` } : undefined}
-      className="glass-dock fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 overflow-x-auto border-t px-3 py-2 [scrollbar-width:none] sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:gap-1.5 sm:overflow-visible sm:rounded-[26px] sm:border sm:p-2.5 md:gap-[9px]">
+    <RefractionFilter id={REFRACTION_ID} map={refraction} />
+    <nav ref={dock} aria-label="Mailbox" style={refractionStyle(REFRACTION_ID, refraction)}
+      className="glass-dock fixed bottom-4 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-1.5 rounded-[26px] border p-2.5 sm:flex md:gap-[9px]">
       {items.map((group, groupIndex) => (
         <div key={groupIndex} className="contents">
           {groupIndex > 0 && <span className="glass-divider mx-0.5 h-7 w-px shrink-0" aria-hidden="true" />}

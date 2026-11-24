@@ -4,6 +4,8 @@ import { useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent 
 import { GOOGLE_REAUTH_ATTEMPT_KEY } from "@/lib/google-login";
 import type { MailTheme } from "@/lib/mail-theme";
 import { initials } from "./mail-detail";
+import { BottomSheet } from "./bottom-sheet";
+import { useIsPhone } from "./use-is-phone";
 import { AboutYouForm } from "./about-you-form";
 import { SummaryAnswers } from "./summary-answers";
 
@@ -82,8 +84,10 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
   const email = profile.email || "Connected account";
   const avatar = profile.name ? initials(profile.name) : "G";
 
+  // Phones open the menu as a bottom sheet, which closes on its own backdrop, Escape and X.
+  const isPhone = useIsPhone();
   useEffect(() => {
-    if (!open) return;
+    if (!open || isPhone) return;
     const closeOnOutsidePress = (event: PointerEvent) => {
       if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
     };
@@ -96,7 +100,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
       document.removeEventListener("pointerdown", closeOnOutsidePress);
       window.removeEventListener("blur", closeOnLeave);
     };
-  }, [open]);
+  }, [isPhone, open]);
 
   async function signOut() {
     if (signingOut) return;
@@ -118,10 +122,37 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
     }
   }
 
+  // The menu's contents: a dropdown under the account button, or a bottom sheet on phones.
+  const menuContent = (
+    <>
+    <div className="mb-1 flex items-center gap-3 rounded-[13px] bg-gradient-to-br from-mail-accent-tint to-transparent p-3">
+      <ProfileAvatar label={avatar} picture={profile.picture} className="size-11 text-sm" />
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-bold">{displayName}</span>
+        <span className="mt-0.5 block truncate text-xs text-mail-muted">{email}</span>
+        <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-mail-success-tint px-2 py-0.5 text-[10px] font-bold text-mail-success"><span className="size-1.5 rounded-full bg-[#2fbf86]" aria-hidden="true" />Gmail connected</span>
+      </span>
+    </div>
+    <button type="button" onClick={() => { setSettingsOpen(true); settings.current?.showModal(); setOpen(false); }}
+      className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold transition-colors hover:bg-mail-muted-surface">
+      <span className="grid size-8 place-items-center rounded-lg bg-mail-accent-tint text-mail-accent"><AccountIcon name="settings" /></span>
+      Settings
+    </button>
+    <div className="border-t border-mail-line pt-2">
+      <button type="button" onClick={() => void signOut()} aria-disabled={signingOut}
+        className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-mail-danger transition-colors hover:bg-mail-danger-tint aria-disabled:cursor-wait aria-disabled:opacity-70">
+        <span className="grid size-8 place-items-center rounded-lg bg-mail-danger-tint"><AccountIcon name="logout" /></span>
+        {signingOut ? "Signing out…" : "Sign out"}
+      </button>
+      {error && <p role="alert" className="px-2 pb-1 pt-2 text-xs text-mail-danger">{error}</p>}
+    </div>
+    </>
+  );
+
   return (
     <>
       <div ref={root} className="relative shrink-0"
-        onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
+        onBlur={(event) => { if (!isPhone && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
         onKeyDown={(event) => {
           if (event.key !== "Escape" || !open) return;
           event.stopPropagation();
@@ -131,7 +162,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
         <button ref={trigger} type="button" aria-label={`Account options for ${profile.email || displayName}`} aria-expanded={open} aria-controls={open ? menuId : undefined}
           onClick={() => setOpen(!open)}
           className="group flex items-center gap-3 rounded-full border border-mail-line/60 bg-mail-surface/50 p-1.5 text-left backdrop-blur transition duration-200 hover:border-mail-accent-line/70 hover:bg-mail-accent-tint/60 md:gap-3.5 md:pr-2.5 aria-expanded:border-mail-accent-line/70 aria-expanded:bg-mail-accent-tint/60 motion-reduce:transition-none">
-          <ProfileAvatar label={avatar} picture={profile.picture} className="size-11 text-sm" connected />
+          <ProfileAvatar label={avatar} picture={profile.picture} className="size-11 text-sm max-sm:size-9 max-sm:text-xs" connected />
           <span className="hidden min-w-0 max-w-[220px] md:block">
             <span className="block truncate text-sm font-bold leading-tight">{displayName}</span>
             <span className="mt-1 block truncate text-xs leading-tight text-mail-muted">{email}</span>
@@ -141,39 +172,23 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
           </span>
         </button>
 
-        {open && (
+        {open && !isPhone && (
           <div id={menuId} className="account-menu-in absolute right-0 top-full z-50 mt-2.5 w-[min(18.5rem,calc(100vw-2rem))] origin-top-right space-y-1 rounded-[18px] border border-mail-line bg-mail-surface p-2 text-foreground shadow-[0_18px_48px_rgba(23,17,51,.22)]">
-            <div className="mb-1 flex items-center gap-3 rounded-[13px] bg-gradient-to-br from-mail-accent-tint to-transparent p-3">
-              <ProfileAvatar label={avatar} picture={profile.picture} className="size-11 text-sm" />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-bold">{displayName}</span>
-                <span className="mt-0.5 block truncate text-xs text-mail-muted">{email}</span>
-                <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-mail-success-tint px-2 py-0.5 text-[10px] font-bold text-mail-success"><span className="size-1.5 rounded-full bg-[#2fbf86]" aria-hidden="true" />Gmail connected</span>
-              </span>
-            </div>
-            <button type="button" onClick={() => { setSettingsOpen(true); settings.current?.showModal(); setOpen(false); }}
-              className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold transition-colors hover:bg-mail-muted-surface">
-              <span className="grid size-8 place-items-center rounded-lg bg-mail-accent-tint text-mail-accent"><AccountIcon name="settings" /></span>
-              Settings
-            </button>
-            <div className="border-t border-mail-line pt-2">
-              <button type="button" onClick={() => void signOut()} aria-disabled={signingOut}
-                className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-mail-danger transition-colors hover:bg-mail-danger-tint aria-disabled:cursor-wait aria-disabled:opacity-70">
-                <span className="grid size-8 place-items-center rounded-lg bg-mail-danger-tint"><AccountIcon name="logout" /></span>
-                {signingOut ? "Signing out…" : "Sign out"}
-              </button>
-              {error && <p role="alert" className="px-2 pb-1 pt-2 text-xs text-mail-danger">{error}</p>}
-            </div>
+            {menuContent}
           </div>
         )}
       </div>
+
+      <BottomSheet open={open && isPhone} onClose={() => setOpen(false)} title="Account">
+        <div id={menuId} className="space-y-1">{menuContent}</div>
+      </BottomSheet>
 
       <dialog ref={settings} aria-labelledby={settingsTitleId} onClose={() => { setSettingsOpen(false); trigger.current?.focus(); }}
         // A click on the dimmed area around the window closes it, like its X button. Only a
         // press and release both outside count, so selecting text inside never closes it.
         onPointerDown={(event) => { pressedOutside.current = outsideDialog(event); }}
         onClick={(event) => { if (pressedOutside.current && outsideDialog(event)) settings.current?.close(); pressedOutside.current = false; }}
-        className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-[18px] border border-mail-line bg-mail-surface p-[27px] text-foreground shadow-[0_25px_70px_rgba(21,17,26,0.27)] backdrop:bg-[#211f2b88]">
+        className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-[18px] max-sm:mb-0 max-sm:mt-auto max-sm:w-full max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[22px] max-sm:pb-[calc(27px+env(safe-area-inset-bottom))] border border-mail-line bg-mail-surface p-[27px] text-foreground shadow-[0_25px_70px_rgba(21,17,26,0.27)] backdrop:bg-[#211f2b88]">
         <div className="mb-5 flex items-center justify-between gap-4">
           <div><span className="block text-[11px] font-extrabold uppercase tracking-[0.12em] text-mail-accent">Account</span><h2 id={settingsTitleId} className="mt-1.5 text-2xl tracking-[-0.03em]">Settings</h2></div>
           <form method="dialog"><button type="submit" aria-label="Close settings" className="grid size-9 place-items-center rounded-full text-mail-secondary transition-colors hover:bg-mail-muted-surface"><AccountIcon name="close" /></button></form>

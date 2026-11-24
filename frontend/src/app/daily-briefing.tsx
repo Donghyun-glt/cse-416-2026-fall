@@ -99,10 +99,10 @@ function useInsights(messages: Mail[], onPriority: (id: string, priority: Priori
 }
 
 // Each priority is a lane with a tab on top, as in the design preview.
-const lanes: Record<Priority, { label: string; lane: string; tab: string }> = {
-  urgent: { label: "Urgent", lane: "border-mail-lane-urgent-line bg-mail-lane-urgent", tab: "bg-mail-danger-tint text-mail-danger" },
-  fyi: { label: "FYI", lane: "border-mail-lane-fyi-line bg-mail-lane-fyi", tab: "bg-mail-warning-tint text-mail-warning" },
-  low: { label: "Low Priority", lane: "border-mail-lane-low-line bg-mail-lane-low", tab: "bg-mail-success-tint text-mail-success" },
+const lanes: Record<Priority, { label: string; short: string; lane: string; tab: string; text: string }> = {
+  urgent: { label: "Urgent", short: "Urgent", lane: "border-mail-lane-urgent-line bg-mail-lane-urgent", tab: "bg-mail-danger-tint text-mail-danger", text: "text-mail-danger" },
+  fyi: { label: "FYI", short: "FYI", lane: "border-mail-lane-fyi-line bg-mail-lane-fyi", tab: "bg-mail-warning-tint text-mail-warning", text: "text-mail-warning" },
+  low: { label: "Low Priority", short: "Low", lane: "border-mail-lane-low-line bg-mail-lane-low", tab: "bg-mail-success-tint text-mail-success", text: "text-mail-success" },
 };
 
 function timeLabel(value: string) {
@@ -162,16 +162,33 @@ function BriefingCard({ message, insight, onOpen }: { message: Mail; insight: In
 /** Today's inbox in three priority lanes; each card carries an AI summary and a calendar flag. */
 export function DailyBriefing({ messages, onOpen, onPriority }: { messages: Mail[]; onOpen: (message: Mail) => void; onPriority: (id: string, priority: Priority) => void }) {
   const insights = useInsights(messages, onPriority);
-  return <div className="grid items-start gap-[18px] pt-[17px] md:grid-cols-2 xl:grid-cols-3">
+  // Phones show one lane at a time, picked with the tabs below; it starts on the most
+  // urgent lane that has mail. Wider screens show all three lanes side by side.
+  const [chosenLane, setChosenLane] = useState<Priority | null>(null);
+  const count = (priority: Priority) => messages.filter((message) => message.priority === priority).length;
+  const phoneLane = chosenLane ?? PRIORITIES.find((priority) => count(priority) > 0) ?? "urgent";
+  return <>
+  <div role="tablist" aria-label="Priority" className="grid grid-cols-3 gap-1 rounded-[14px] bg-mail-muted-surface p-1 sm:hidden">
+    {PRIORITIES.map((priority) => {
+      const selected = priority === phoneLane;
+      return <button key={priority} type="button" role="tab" aria-selected={selected} onClick={() => setChosenLane(priority)}
+        className={`flex h-10 items-center justify-center gap-1.5 rounded-[11px] text-[13px] font-bold transition ${selected ? `bg-mail-surface shadow-[0_2px_8px_rgba(39,37,32,0.1)] ${lanes[priority].text}` : "text-mail-secondary"}`}>
+        {lanes[priority].short}<span className={`rounded-full px-1.5 text-[11px] ${selected ? lanes[priority].tab : "bg-mail-hover"}`}>{count(priority)}</span>
+      </button>;
+    })}
+  </div>
+  {/* grid-cols-1 keeps a lane from growing wider than the screen when a subject is long. */}
+  <div className="grid grid-cols-1 items-start gap-[18px] pt-[17px] max-sm:pt-0 md:grid-cols-2 xl:grid-cols-3">
     {PRIORITIES.map((priority) => {
       const group = messages.filter((message) => message.priority === priority);
       const lane = lanes[priority];
-      return <section key={priority} aria-label={`${lane.label} emails`} className={`relative rounded-[17px] border px-[13px] pb-[13px] pt-[18px] shadow-[0_5px_18px_rgba(39,37,32,0.05)] ${lane.lane}`}>
-        <h3 className={`absolute -top-[17px] right-4 z-[2] rounded-[10px_10px_3px_3px] px-4 py-[9px] text-xs font-extrabold leading-none shadow-[0_3px_8px_rgba(39,37,32,0.07)] ${lane.tab}`}>{group.length} {lane.label}</h3>
+      return <section key={priority} aria-label={`${lane.label} emails`} className={`relative min-w-0 rounded-[17px] border px-[13px] pb-[13px] pt-[18px] shadow-[0_5px_18px_rgba(39,37,32,0.05)] max-sm:pt-[13px] ${lane.lane} ${priority === phoneLane ? "" : "max-sm:hidden"}`}>
+        <h3 className={`absolute -top-[17px] right-4 z-[2] rounded-[10px_10px_3px_3px] px-4 py-[9px] text-xs font-extrabold leading-none shadow-[0_3px_8px_rgba(39,37,32,0.07)] max-sm:hidden ${lane.tab}`}>{group.length} {lane.label}</h3>
         {group.length === 0
           ? <p className="rounded-xl bg-mail-surface/60 px-4 py-6 text-center text-xs text-mail-muted">No {lane.label.toLowerCase()} email today.</p>
           : <div>{group.map((message) => <BriefingCard key={message.id} message={message} insight={insights[message.id]} onOpen={onOpen} />)}</div>}
       </section>;
     })}
-  </div>;
+  </div>
+  </>;
 }

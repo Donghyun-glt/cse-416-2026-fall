@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { GOOGLE_REAUTH_ATTEMPT_KEY } from "@/lib/google-login";
 import { MAIL_THEME_COOKIE, type MailTheme } from "@/lib/mail-theme";
 import { AccountMenu } from "./account-menu";
-import { ActionRail, type MailView } from "./action-rail";
+import { ActionRail, viewIcons, type MailView } from "./action-rail";
+import { MobileTabBar } from "./mobile-tab-bar";
 import { GoogleLoginButton } from "./google-login-button";
 import { GoogleCalendar } from "./google-calendar";
 import { DailyBriefing } from "./daily-briefing";
@@ -740,6 +741,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   const searchBar = searchableViews.has(view) && <SearchBar value={searchInput} active={Boolean(searchQuery)}
     placeholder={view === "summary" ? "Search to-dos" : `Search ${viewTitles[view]} by sender, subject or message`}
     onChange={changeSearchInput} onSubmit={submitSearch} onClear={clearSearch} />;
+  const listDetail = loading ? "Syncing your inbox…" : `${mailboxSearch ? `Results for “${mailboxSearch}” · ` : ""}Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`;
   const emptyMessage = mailboxSearch ? `No messages in ${viewTitles[view]} match “${mailboxSearch}”${onlyAttachments || onlyUnread ? " with these filters" : ""}.`
     : view === "briefing" ? "No inbox messages have arrived since midnight." : view === "sent" ? "You haven't sent any messages yet." : view === "spam" ? "Nothing in Spam."
       : onlyAttachments || onlyUnread ? "No messages match these filters." : view === "inbox" ? "Your inbox is empty. Archived mail is in All Emails." : "There are no messages to show.";
@@ -754,20 +756,34 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   return (
     <main data-mail-theme={theme} className="mail-canvas min-h-screen text-foreground">
       <ActionRail view={view} onSelect={changeView} onCompose={toggleCompose} composeOpen={Boolean(compose)} />
+      {/* Phones: tab bar along the bottom and a compose button above it (both out of the way while a message or the composer is open). */}
+      <MobileTabBar view={view} onSelect={changeView} hidden={Boolean(selectedMail)} />
+      {!selectedMail && !compose && (
+        <button type="button" data-mobile-compose onClick={toggleCompose} aria-label="Compose"
+          className="fixed bottom-[calc(84px+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center rounded-[18px] bg-gradient-to-br from-[#8b7bff] via-[#6a55e6] to-[#4a36c4] text-white shadow-[0_10px_26px_rgba(89,68,216,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] transition-transform active:scale-95 sm:hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-6" aria-hidden="true">{viewIcons.compose}</svg>
+        </button>
+      )}
 
-      <header className="relative z-30 border-b border-mail-line/80 bg-mail-header backdrop-blur-sm">
-        <div className={`flex items-center justify-between gap-4 px-[clamp(18px,5vw,80px)] py-[25px] sm:py-[31px] ${pageDescription ? "min-h-[116px] sm:min-h-[132px]" : "min-h-[91px] sm:min-h-[107px]"}`}>
-          <div className="min-w-0">
-            <div className="mb-3"><Wordmark /></div>
-            <h1 className="truncate text-[23px] leading-tight tracking-[-0.04em] sm:text-[30px]">{pageTitle}</h1>
-            {pageDescription && <p className="mt-[5px] text-sm text-mail-muted">{pageDescription}</p>}
+      {/* Phones get a 56 px bar (mark, title, account) that stays at the top; an open message has its own bar instead. */}
+      <header className={`relative z-30 border-b border-mail-line/80 bg-mail-header backdrop-blur-sm max-sm:sticky max-sm:top-0 max-sm:pt-[env(safe-area-inset-top)] ${selectedMail ? "max-sm:hidden" : ""}`}>
+        <div className={`flex items-center justify-between gap-4 px-[clamp(18px,5vw,80px)] py-[25px] max-sm:min-h-14 max-sm:gap-3 max-sm:py-2 sm:py-[31px] ${pageDescription ? "min-h-[116px] sm:min-h-[132px]" : "min-h-[91px] sm:min-h-[107px]"}`}>
+          <div className="flex min-w-0 items-center gap-2.5 sm:block">
+            <BrandMark className="h-8 w-8 rounded-[10px] sm:hidden" />
+            <div className="min-w-0">
+              <div className="mb-3 max-sm:hidden"><Wordmark /></div>
+              <h1 className="truncate text-[23px] leading-tight tracking-[-0.04em] max-sm:text-[19px] sm:text-[30px]">
+                <span className="sm:hidden">{viewTitles[view]}</span><span className="max-sm:hidden">{pageTitle}</span>
+              </h1>
+              {pageDescription && <p className="mt-[5px] text-sm text-mail-muted max-sm:hidden">{pageDescription}</p>}
+            </div>
           </div>
           <AccountMenu profile={profile} theme={theme} onThemeChange={changeTheme} />
         </div>
       </header>
 
-      {/* Bottom padding keeps the last row clear of the navigation dock. */}
-      <div className="px-[clamp(14px,5vw,80px)] pb-24 pt-[26px] sm:pb-[120px]">
+      {/* Bottom padding keeps the last row clear of the dock (phones: the tab bar and the compose button). */}
+      <div className="px-[clamp(14px,5vw,80px)] pb-24 pt-[26px] max-sm:pb-[calc(150px+env(safe-area-inset-bottom))] max-sm:pt-4 sm:pb-[120px]">
         {selectedMail ? (
           <MailDetail
             key={selectedMail.id}
@@ -800,9 +816,17 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
           <SummaryTodoList messages={displayedMessages} searchQuery={searchQuery} search={searchBar} pending={summaryPending} loading={loading} error={error} onOpen={openMessage} onRefresh={() => void loadMessages("summary")} />
         ) : view === "briefing" ? (
           <div className="space-y-[17px]">
-            <MetricGrid messages={messages} loading={loading} />
-            <TodayPanel onOpenCalendar={() => changeView("calendar")} />
-            <SectionHead eyebrow="Prioritized inbox" title="Today's emails" className="pt-3"
+            {/* On phones the greeting moves out of the slim header to the top of the page. */}
+            <div className="sm:hidden">
+              <p className="text-[22px] leading-tight tracking-[-0.03em]">{greeting()}{profile.name ? `, ${profile.name.split(/\s+/)[0]}` : ""}</p>
+              <p className="mt-1 text-[13px] text-mail-muted">{pageDescription}</p>
+            </div>
+            {/* Phones skip these: the priority tabs carry the counts, the greeting the date, the tab bar the calendar. */}
+            <div className="space-y-[17px] max-sm:hidden">
+              <MetricGrid messages={messages} loading={loading} />
+              <TodayPanel onOpenCalendar={() => changeView("calendar")} />
+            </div>
+            <SectionHead eyebrow="Prioritized inbox" title="Today's emails" className="pt-3 max-sm:hidden"
               detail={loading ? "Syncing your inbox…" : `${messages.length} message${messages.length === 1 ? "" : "s"} · Updates automatically`} />
             {error && <ErrorBanner>{error}</ErrorBanner>}
             {loading ? <div className={`${panel} p-8 text-center text-sm text-mail-muted`}>Loading messages…</div>
@@ -811,8 +835,9 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
           </div>
         ) : (
           <section>
-            <SectionHead eyebrow={viewTitles[view]} title={mailboxSearch ? "Search results" : "Messages"}
-              detail={loading ? "Syncing your inbox…" : `${mailboxSearch ? `Results for “${mailboxSearch}” · ` : ""}Page ${allPageIndex + 1} · ${messages.length} message${messages.length === 1 ? "" : "s"}`}
+            {/* Phones show the mailbox name in the top bar and compose from the floating button. */}
+            <SectionHead className="mb-[18px] max-sm:hidden" eyebrow={viewTitles[view]} title={mailboxSearch ? "Search results" : "Messages"}
+              detail={listDetail}
               actions={<button type="button" onClick={openCompose} className={primaryButton}>+ Compose</button>} />
             {searchBar}
             <div className="my-4 flex flex-wrap gap-[7px]" aria-label="Filters">
@@ -822,16 +847,21 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
                 </button>
               ))}
             </div>
+            {(loading || mailboxSearch) && <p className="-mt-1 mb-3 text-xs text-mail-muted sm:hidden">{listDetail}</p>}
             {(view === "trash" || view === "spam") && <p className="mb-4 rounded-[10px] bg-mail-muted-surface px-4 py-3 text-center text-[13px] text-mail-muted">Messages in {view === "trash" ? "Trash" : "Spam"} are automatically deleted after 30 days.</p>}
             {error && <div className="mb-4"><ErrorBanner>{error}</ErrorBanner></div>}
-            <div className="sticky top-0 z-20 flex h-12 items-center justify-between border-b border-mail-line bg-background/85 px-2 backdrop-blur-md">
-              <div className="flex items-center gap-2"><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-mail-muted"><input type="checkbox" checked={messages.length > 0 && messages.every((message) => selectedIds.has(message.id))} onChange={toggleAllSelections} aria-label="Select all messages on this page" className="h-4 w-4 cursor-pointer accent-[#5944d8]" /><span className="hidden sm:inline">Select</span></label>{selectedIds.size > 0 && (() => {
-                const busy = Boolean(bulkAction) || bulkDeleting || bulkRestoring;
-                const anyUnread = messages.some((message) => selectedIds.has(message.id) && message.unread);
+            {(() => {
+              // Actions for the checked rows: in the toolbar on wider screens, in a bar over the page on phones.
+              const busy = Boolean(bulkAction) || bulkDeleting || bulkRestoring;
+              const anyUnread = messages.some((message) => selectedIds.has(message.id) && message.unread);
+              const allChecked = messages.length > 0 && messages.every((message) => selectedIds.has(message.id));
+              const actionsFor = (phone: boolean) => {
                 const bulkButton = (icon: Parameters<typeof Icon>[0]["name"], label: string, onClick: () => void, working = false) => (
                   <button key={label} type="button" onClick={onClick} disabled={busy} aria-label={`${label} (${selectedIds.size} selected)`} title={label}
-                    className="flex h-9 items-center gap-2 rounded-[10px] px-2.5 text-xs font-bold text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-40">
-                    <Icon name={icon} className="h-4 w-4" /><span className="hidden md:inline">{working ? "Working…" : label}</span>
+                    className={phone
+                      ? "grid size-10 place-items-center rounded-full text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-40"
+                      : "flex h-9 items-center gap-2 rounded-[10px] px-2.5 text-xs font-bold text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-40"}>
+                    <Icon name={icon} className={phone ? "h-5 w-5" : "h-4 w-4"} />{!phone && <span className="hidden md:inline">{working ? "Working…" : label}</span>}
                   </button>
                 );
                 const archive = bulkButton("archive", "Archive", () => void applyBulkAction("archive"), bulkAction === "archive");
@@ -841,7 +871,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
                   ? bulkButton("mail", "Mark as read", () => void applyBulkAction("read"), bulkAction === "read")
                   : bulkButton("mail", "Mark as unread", () => void applyBulkAction("unread"), bulkAction === "unread");
                 // Each mailbox offers only the actions that make sense there, like Gmail.
-                const actions = view === "trash"
+                return view === "trash"
                   ? [bulkButton("inbox", "Restore", () => void moveSelectedMailsToAllEmails(), bulkRestoring)]
                   : view === "spam"
                     ? [bulkButton("inbox", "Not spam", () => void applyBulkAction("notSpam"), bulkAction === "notSpam"), trash, readState]
@@ -850,35 +880,62 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
                       : view === "sent"
                         ? [trash, readState]
                         : [archive, spam, trash, readState];
-                return <span className="ml-2 flex items-center gap-0.5"><span className="mr-1 whitespace-nowrap text-xs font-semibold text-mail-accent">{selectedIds.size} selected</span>{actions}</span>;
-              })()}</div>
-              <div className="flex items-center gap-1"><button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} aria-label="Previous page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-30">‹</button><button type="button" onClick={goToNextPage} disabled={!nextPageToken} aria-label="Next page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-30">›</button></div>
-            </div>
+              };
+              return <>
+                <div className="sticky top-0 z-20 flex h-12 items-center justify-between border-b border-mail-line bg-background/85 px-2 backdrop-blur-md max-sm:hidden">
+                  <div className="flex items-center gap-2"><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-mail-muted"><input type="checkbox" checked={allChecked} onChange={toggleAllSelections} aria-label="Select all messages on this page" className="h-4 w-4 cursor-pointer accent-[#5944d8]" /><span className="hidden sm:inline">Select</span></label>
+                    {selectedIds.size > 0 && <span className="ml-2 flex items-center gap-0.5"><span className="mr-1 whitespace-nowrap text-xs font-semibold text-mail-accent">{selectedIds.size} selected</span>{actionsFor(false)}</span>}</div>
+                  <div className="flex items-center gap-1"><button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} aria-label="Previous page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-30">‹</button><button type="button" onClick={goToNextPage} disabled={!nextPageToken} aria-label="Next page" className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-mail-secondary transition hover:bg-mail-muted-surface disabled:cursor-not-allowed disabled:opacity-30">›</button></div>
+                </div>
+                {selectedIds.size > 0 && (
+                  <div role="toolbar" aria-label="Selected messages" className="fixed inset-x-0 top-0 z-50 flex h-[calc(56px+env(safe-area-inset-top))] items-center gap-1 border-b border-mail-line bg-mail-surface px-2 pt-[env(safe-area-inset-top)] shadow-[0_6px_20px_rgba(39,37,32,0.12)] sm:hidden">
+                    <button type="button" onClick={() => setSelectedIds(new Set())} aria-label="Clear selection" className="grid size-10 place-items-center rounded-full text-mail-secondary hover:bg-mail-muted-surface">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="size-5" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                    </button>
+                    <span className="min-w-6 text-[15px] font-extrabold">{selectedIds.size}</span>
+                    <button type="button" onClick={toggleAllSelections} className="ml-1 rounded-full px-2.5 py-1.5 text-xs font-bold text-mail-accent hover:bg-mail-accent-tint">{allChecked ? "Select none" : "Select all"}</button>
+                    <span className="ml-auto flex items-center">{actionsFor(true)}</span>
+                  </div>
+                )}
+              </>;
+            })()}
             {loading ? <div className="p-8 text-center text-sm text-mail-muted">Loading messages…</div> : messages.length === 0 ? emptyState : <div>{messages.map((message) => {
               // In Sent the row names the recipient instead of the sender.
               const contact = view === "sent" ? message.to.split(",")[0] || "" : message.from;
               const person = formatSender(contact);
               const sender = view === "sent" ? `To: ${person || "(no recipient)"}` : person;
-              return <article key={message.id} className="select-none border-b border-mail-line last:border-b-0" onMouseDown={(event) => { if (event.detail > 1) event.preventDefault(); }}>
-                <div className="flex items-center gap-1.5 rounded-xl px-2 py-[13px] transition hover:bg-mail-surface sm:gap-2">
-                  <input type="checkbox" checked={selectedIds.has(message.id)} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8]" />
+              const seed = contact.match(/<([^>]+)>/)?.[1] ?? contact;
+              const selected = selectedIds.has(message.id);
+              const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
+              return <article key={message.id} className={`select-none border-b border-mail-line last:border-b-0 ${selected ? "max-sm:bg-mail-accent-tint/50" : ""}`} onMouseDown={(event) => { if (event.detail > 1) event.preventDefault(); }}>
+                <div className="flex items-center gap-1.5 rounded-xl px-2 py-[13px] transition hover:bg-mail-surface max-sm:gap-3 max-sm:px-1 max-sm:py-3 sm:gap-2">
+                  <input type="checkbox" checked={selected} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8] max-sm:hidden" />
+                  {/* Phones: tapping the avatar selects the row (a checkbox is too small for a finger). */}
+                  <button type="button" onClick={() => toggleSelection(message.id)} aria-pressed={selected} aria-label={`Select ${message.subject}`} className="shrink-0 self-start sm:hidden">
+                    {selected
+                      ? <span className="grid h-[38px] w-[38px] place-items-center rounded-full bg-[#5944d8] text-white"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg></span>
+                      : <Avatar label={initials(person || "?")} seed={seed} />}
+                  </button>
                   {view === "trash"
-                    ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-mail-muted"><Icon name="trash" className="h-4 w-4" /></span>
-                    : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xl leading-none transition hover:bg-mail-hover ${message.starred ? "text-[#e7b928]" : "text-mail-muted"}`}>{message.starred ? "★" : "☆"}</button>}
+                    ? <span className="flex h-8 w-8 shrink-0 items-center justify-center text-mail-muted max-sm:order-last"><Icon name="trash" className="h-4 w-4" /></span>
+                    : <button type="button" onClick={() => void toggleStar(message)} aria-label={message.starred ? "Remove favorite" : "Add favorite"} aria-pressed={message.starred} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xl leading-none transition hover:bg-mail-hover max-sm:order-last max-sm:-mr-1 max-sm:h-10 max-sm:w-10 ${message.starred ? "text-[#e7b928]" : "text-mail-muted"}`}>{message.starred ? "★" : "☆"}</button>}
                   <button type="button" onClick={() => openMessage(message)} className="flex min-w-0 flex-1 items-center gap-3 text-left sm:gap-[15px]">
-                    <Avatar label={initials(person || "?")} seed={contact.match(/<([^>]+)>/)?.[1] ?? contact} />
+                    <Avatar label={initials(person || "?")} seed={seed} className="h-[38px] w-[38px] text-[11px] max-sm:hidden" />
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 items-center gap-[5px]">
-                        <b className={`truncate text-[13px] ${message.unread ? "font-extrabold" : "font-semibold text-mail-secondary"}`}>{sender}</b>
+                        <b className={`truncate text-[13px] max-sm:text-sm ${message.unread ? "font-extrabold" : "font-semibold text-mail-secondary"}`}>{sender}</b>
                         {message.unread && <><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-mail-accent" aria-hidden="true" /><span className="sr-only">Unread</span></>}
                         {message.hasDraft && <span className="shrink-0 text-xs font-semibold text-mail-danger">Draft</span>}
+                        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-[11px] text-mail-muted sm:hidden">
+                          {hasAttachment && <Icon name="paperclip" className="h-3.5 w-3.5" />}{formatTime(message.date)}
+                        </span>
                       </span>
                       <strong className={`mt-1 block truncate text-[13px] ${message.unread ? "font-bold" : "font-medium"}`}>{message.subject || "(no subject)"}</strong>
                       {message.snippet && <small className="mt-1 block truncate text-xs text-mail-muted">{message.snippet}</small>}
                     </span>
-                    <span className="grid shrink-0 justify-items-end gap-3 text-right">
+                    <span className="grid shrink-0 justify-items-end gap-3 text-right max-sm:hidden">
                       <span className="flex items-center gap-1.5">
-                        {message.attachments.some((attachment) => !attachment.inline) && <span title="Has attachment" className="text-mail-muted"><Icon name="paperclip" className="h-3.5 w-3.5" /></span>}
+                        {hasAttachment && <span title="Has attachment" className="text-mail-muted"><Icon name="paperclip" className="h-3.5 w-3.5" /></span>}
                         <time className="text-[11px] text-mail-muted">{formatTime(message.date)}</time>
                       </span>
                       {!message.draft && <span className="hidden sm:block"><PriorityBadge priority={message.priority} /></span>}
@@ -887,6 +944,14 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
                 </div>
               </article>;
             })}</div>}
+            {/* Phones page through the list here instead of in the toolbar. */}
+            {!loading && (allPageIndex > 0 || nextPageToken) && (
+              <div className="mt-4 flex items-center justify-between sm:hidden">
+                <button type="button" onClick={goToPreviousPage} disabled={allPageIndex === 0} className={`${chip(false)} h-10 px-4 disabled:opacity-40`}>‹ Newer</button>
+                <span className="text-xs text-mail-muted">Page {allPageIndex + 1}</span>
+                <button type="button" onClick={goToNextPage} disabled={!nextPageToken} className={`${chip(false)} h-10 px-4 disabled:opacity-40`}>Older ›</button>
+              </div>
+            )}
           </section>
         )}
       </div>
@@ -904,7 +969,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
           window.setTimeout(() => setNotice(""), 4000);
           if (view === "sent" || view === "drafts") void loadMessages(view, false, allPageTokens[allPageIndex]);
         }} />}
-      {notice && <p role="status" className="fixed bottom-20 left-4 z-50 rounded-[10px] border border-mail-line bg-mail-success-tint px-4 py-3 text-[13px] font-semibold text-mail-success shadow-[0_8px_24px_rgba(39,37,32,0.12)] sm:bottom-[100px] sm:left-6">{notice}</p>}
+      {notice && <p role="status" className="fixed bottom-20 left-4 z-50 max-sm:bottom-[calc(84px+env(safe-area-inset-bottom))] rounded-[10px] border border-mail-line bg-mail-success-tint px-4 py-3 text-[13px] font-semibold text-mail-success shadow-[0_8px_24px_rgba(39,37,32,0.12)] sm:bottom-[100px] sm:left-6">{notice}</p>}
     </main>
   );
 }
