@@ -54,24 +54,25 @@ function Icon({ name, className = "h-5 w-5" }: { name: "mail" | "inbox" | "spam"
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
 }
 
-/** The MailFlow mark: an envelope whose flap is a soft "flow" curve, with a spark for AI. */
-function BrandMark({ className = "h-7 w-7 rounded-[9px]" }: { className?: string }) {
+/**
+ * The MailFlow mark: two waves of mail flowing down into an open tray. Drawn on its own, with
+ * no tile behind it, and centred in its box; colours follow the light and dark themes.
+ */
+function BrandMark({ className = "size-7" }: { className?: string }) {
   return (
-    <span className={`inline-flex shrink-0 items-center justify-center bg-gradient-to-br from-[#8b7bff] via-[#6a55e6] to-[#4a36c4] text-white shadow-[0_4px_12px_rgba(89,68,216,0.32),inset_0_1px_0_rgba(255,255,255,0.35)] ${className}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-[64%] w-[64%]">
-        <rect x="2.75" y="7" width="15.5" height="11.5" rx="3" />
-        <path d="M3.6 9.3c2.3 2 4.3 3 6.15 3s3.85-1 6.15-3" />
-        <path d="M19.5 1.8l.85 2.35 2.35.85-2.35.85-.85 2.35-.85-2.35-2.35-.85 2.35-.85z" fill="currentColor" stroke="none" />
-      </svg>
-    </span>
+    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${className}`} aria-hidden="true">
+      <path d="M4 4.85c2.6 0 4.4 3.6 8 3.6s5.4-3.6 8-3.6" stroke="var(--brand-mark-soft)" />
+      <path d="M4 9.65c2.6 0 4.4 3.6 8 3.6s5.4-3.6 8-3.6" stroke="var(--brand-mark)" />
+      <path d="M3.5 13.95v2.6a2.6 2.6 0 0 0 2.6 2.6h11.8a2.6 2.6 0 0 0 2.6-2.6v-2.6" stroke="var(--brand-mark)" />
+    </svg>
   );
 }
 
 /** Mark + "MailFlow AI" wordmark; "AI" is a lighter suffix of the same name, not a badge. */
 function Wordmark({ large = false }: { large?: boolean }) {
   return (
-    <span className={`flex items-center ${large ? "justify-center gap-3" : "gap-2.5"}`}>
-      <BrandMark className={large ? "h-12 w-12 rounded-[15px]" : undefined} />
+    <span className={`flex items-center ${large ? "justify-center gap-2.5" : "gap-2"}`}>
+      <BrandMark className={large ? "size-12" : undefined} />
       <span className={`font-bold tracking-[-0.03em] text-foreground ${large ? "text-[26px]" : "text-[17px]"}`}>
         Mail<span className="text-mail-accent">Flow</span><span className="ml-[0.28em] font-medium text-mail-muted">AI</span>
       </span>
@@ -769,7 +770,7 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
       <header className={`relative z-30 border-b border-mail-line/80 bg-mail-header backdrop-blur-sm max-sm:sticky max-sm:top-0 max-sm:pt-[env(safe-area-inset-top)] ${selectedMail ? "max-sm:hidden" : ""}`}>
         <div className={`flex items-center justify-between gap-4 px-[clamp(18px,5vw,80px)] py-[25px] max-sm:min-h-14 max-sm:gap-3 max-sm:py-2 sm:py-[31px] ${pageDescription ? "min-h-[116px] sm:min-h-[132px]" : "min-h-[91px] sm:min-h-[107px]"}`}>
           <div className="flex min-w-0 items-center gap-2.5 sm:block">
-            <BrandMark className="h-8 w-8 rounded-[10px] sm:hidden" />
+            <BrandMark className="size-8 sm:hidden" />
             <div className="min-w-0">
               <div className="mb-3 max-sm:hidden"><Wordmark /></div>
               <h1 className="truncate text-[23px] leading-tight tracking-[-0.04em] max-sm:text-[19px] sm:text-[30px]">
