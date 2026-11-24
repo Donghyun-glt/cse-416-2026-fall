@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- MailFlow mark (same as BrandMark in mail-client.tsx), drawn bolder so it reads at tab size. -->
+  <defs>
+    <linearGradient id="fill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b7bff"/>
+      <stop offset="0.5" stop-color="#6a55e6"/>
+      <stop offset="1" stop-color="#4a36c4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#fill)"/>
+  <g transform="translate(6.4 11.8) scale(2.05)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.75" y="7" width="15.5" height="11.5" rx="3"/>
+    <path d="M3.6 9.3c2.3 2 4.3 3 6.15 3s3.85-1 6.15-3"/>
+    <path d="M19.5 1.8l.85 2.35 2.35.85-2.35.85-.85 2.35-.85-2.35-2.35-.85 2.35-.85z" fill="#fff" stroke="none"/>
+  </g>
+</svg>
