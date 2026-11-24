@@ -62,19 +62,72 @@ export async function createGmailSession(tokens: Credentials) {
   return sessionId;
 }
 
+// ----- Session lookups -----
+// Every API request starts by finding its session. Reading it from the database each time
+// costs one round trip per request (about 0.2 s from a distant database), so a session that
+// was just read is kept in this server's memory for a minute and reused. Only sessions that
+// exist are kept. Logging out removes the entry at once on the server that handles the
+// logout; another server instance can keep using its copy for at most SESSION_CACHE_MS.
+const SESSION_CACHE_MS = 60_000;
+const SESSION_CACHE_LIMIT = 500;
+
+type CachedSession = { tokens: Credentials; userId: number | null; until: number };
+type SessionCache = {
+  entries: Map<string, CachedSession>;
+  /** Lookups in flight: requests arriving together share one database query. */
+  pending: Map<string, Promise<CachedSession | undefined>>;
+  /** Sessions deleted here, so a lookup that was already running cannot cache them again. */
+  revoked: Set<string>;
+};
+// Kept on globalThis so development hot reloads do not start an empty cache each time.
+const globalWithSessions = globalThis as typeof globalThis & { mailflowSessionCache?: SessionCache };
+const sessionCache = globalWithSessions.mailflowSessionCache
+  ?? (globalWithSessions.mailflowSessionCache = { entries: new Map(), pending: new Map(), revoked: new Set() });
+
+async function lookupSession(sessionId: string): Promise<CachedSession | undefined> {
+  const hash = sessionHash(sessionId);
+  const cached = sessionCache.entries.get(hash);
+  if (cached && cached.until > Date.now()) return cached;
+  if (cached) sessionCache.entries.delete(hash);
+  const inFlight = sessionCache.pending.get(hash);
+  if (inFlight) return inFlight;
+
+  const work = (async () => {
+    // last_seen_at is therefore written at most about once a minute per session.
+    const result = await query<{ token_ciphertext: string; user_id: number | null; expires_at: Date | string }>(`
+      UPDATE oauth_sessions
+      SET last_seen_at = NOW()
+      WHERE session_hash = $1 AND expires_at > NOW()
+      RETURNING token_ciphertext, user_id, expires_at
+    `, [hash]);
+    const row = result.rows[0];
+    const tokens = row ? openGmailTokens(row.token_ciphertext, sessionId) : undefined;
+    if (!row || !tokens) return undefined;
+    const expiresAt = new Date(row.expires_at).getTime();
+    // Never kept past the session's own expiry.
+    const entry: CachedSession = { tokens, userId: row.user_id ?? null, until: Math.min(Date.now() + SESSION_CACHE_MS, Number.isFinite(expiresAt) ? expiresAt : 0) };
+    if (!sessionCache.revoked.has(hash)) {
+      if (sessionCache.entries.size >= SESSION_CACHE_LIMIT) sessionCache.entries.delete(sessionCache.entries.keys().next().value!);
+      sessionCache.entries.set(hash, entry);
+    }
+    return entry;
+  })();
+  sessionCache.pending.set(hash, work);
+  try { return await work; } finally { sessionCache.pending.delete(hash); }
+}
+
 export async function deleteGmailSession(sessionId: string) {
-  await query("DELETE FROM oauth_sessions WHERE session_hash = $1", [sessionHash(sessionId)]);
+  const hash = sessionHash(sessionId);
+  await query("DELETE FROM oauth_sessions WHERE session_hash = $1", [hash]);
+  sessionCache.entries.delete(hash);
+  if (sessionCache.revoked.size >= SESSION_CACHE_LIMIT) sessionCache.revoked.delete(sessionCache.revoked.values().next().value!);
+  sessionCache.revoked.add(hash);
 }
 
 export async function getGmailSession(sessionId: string): Promise<Credentials | undefined> {
-  const result = await query<{ token_ciphertext: string }>(`
-    UPDATE oauth_sessions
-    SET last_seen_at = NOW()
-    WHERE session_hash = $1 AND expires_at > NOW()
-    RETURNING token_ciphertext
-  `, [sessionHash(sessionId)]);
-  const sealed = result.rows[0]?.token_ciphertext;
-  return sealed ? openGmailTokens(sealed, sessionId) : undefined;
+  const session = await lookupSession(sessionId);
+  // A copy per request: the Google client may replace fields on the object it is given.
+  return session ? { ...session.tokens } : undefined;
 }
 
 /**
@@ -82,15 +135,8 @@ export async function getGmailSession(sessionId: string): Promise<Credentials | 
  * linked to this session so callers can skip the Gmail profile round trip.
  */
 export async function getGmailSessionWithUser(sessionId: string): Promise<{ tokens: Credentials; userId: number | null } | undefined> {
-  const result = await query<{ token_ciphertext: string; user_id: number | null }>(`
-    UPDATE oauth_sessions
-    SET last_seen_at = NOW()
-    WHERE session_hash = $1 AND expires_at > NOW()
-    RETURNING token_ciphertext, user_id
-  `, [sessionHash(sessionId)]);
-  const row = result.rows[0];
-  const tokens = row ? openGmailTokens(row.token_ciphertext, sessionId) : undefined;
-  return tokens ? { tokens, userId: row.user_id ?? null } : undefined;
+  const session = await lookupSession(sessionId);
+  return session ? { tokens: { ...session.tokens }, userId: session.userId } : undefined;
 }
 
 export async function attachGmailSessionToUser(sessionId: string, userId: number) {
@@ -99,4 +145,6 @@ export async function attachGmailSessionToUser(sessionId: string, userId: number
     SET user_id = $2, last_seen_at = NOW()
     WHERE session_hash = $1 AND expires_at > NOW()
   `, [sessionHash(sessionId), userId]);
+  const cached = sessionCache.entries.get(sessionHash(sessionId));
+  if (cached) cached.userId = userId;
 }
