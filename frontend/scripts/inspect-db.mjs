@@ -1,5 +1,6 @@
 import process from "node:process";
 import pg from "pg";
+import { withVerifiedSsl } from "../src/lib/database-url.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
 if (!connectionString) {
@@ -7,7 +8,7 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const pool = new pg.Pool({ connectionString, max: 1 });
+const pool = new pg.Pool({ connectionString: withVerifiedSsl(connectionString), max: 1 });
 try {
   const summary = await pool.query(`
     SELECT

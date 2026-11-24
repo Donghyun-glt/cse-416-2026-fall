@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import pg from "pg";
+import { withVerifiedSsl } from "../src/lib/database-url.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
 if (!connectionString) {
@@ -10,7 +11,7 @@ if (!connectionString) {
 }
 
 const migrationsDirectory = path.join(process.cwd(), "db", "migrations");
-const pool = new pg.Pool({ connectionString, max: 1 });
+const pool = new pg.Pool({ connectionString: withVerifiedSsl(connectionString), max: 1 });
 const client = await pool.connect();
 
 try {

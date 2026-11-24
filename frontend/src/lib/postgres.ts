@@ -1,4 +1,5 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import { withVerifiedSsl } from "./database-url.mjs";
 
 type PostgresState = { pool?: Pool };
 
@@ -16,7 +17,7 @@ function getPool() {
     throw new Error("DATABASE_URL must be configured for MailFlow PostgreSQL storage.");
   }
   postgresState.pool = new Pool({
-    connectionString,
+    connectionString: withVerifiedSsl(connectionString),
     max: Number(process.env.DATABASE_POOL_MAX ?? 5),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,

@@ -7,12 +7,13 @@
 // Safe to run again: values that are already encrypted are skipped.
 import process from "node:process";
 import pg from "pg";
+import { withVerifiedSsl } from "../src/lib/database-url.mjs";
 import { isSealed, lookupToken, open, seal, sealJson } from "../src/lib/data-vault.ts";
 
 const apply = process.argv.includes("--apply");
 const connectionString = process.env.DATABASE_URL?.trim();
 if (!connectionString) { console.error("DATABASE_URL must be configured."); process.exit(1); }
-const pool = new pg.Pool({ connectionString, max: 1 });
+const pool = new pg.Pool({ connectionString: withVerifiedSsl(connectionString), max: 1 });
 const client = await pool.connect();
 const plainText = (value) => typeof value === "string" && value !== "" && !isSealed(value);
 const plainJson = (value) => value && typeof value === "object" && !isSealed(value.enc);
