@@ -11,32 +11,68 @@ import { comparePriority } from "@/lib/mail-priority";
 // GET /api/gmail/messages/[id] when the user opens a message.
 const LIST_HEADERS = ["Subject", "From", "To", "Cc", "Date", "List-Unsubscribe"];
 const SUMMARY_DISCOVERY_SIZE = 50;
-const SUMMARY_METADATA_CONCURRENCY = 10;
+// Gmail allows each user about 250 quota units a second and a message read costs 5, so at
+// most 50 reads are in flight at once. A mailbox page (50 messages) still goes out in one go;
+// a Daily Briefing with hundreds of messages no longer fires them all at the same moment.
+const METADATA_CONCURRENCY = 50;
+// A read Gmail refuses for a moment (rate limit, server hiccup) is tried twice more.
+const METADATA_RETRY_DELAYS_MS = [400, 1200];
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function gmailStatus(error: unknown) {
+  const code = (error as { code?: unknown; status?: unknown })?.code ?? (error as { status?: unknown })?.status;
+  return typeof code === "number" ? code : Number(code);
+}
+
+/** Rate limits (429, or 403 with a rate-limit reason) and Gmail server errors pass on their own. */
+function isTemporaryGmailError(error: unknown) {
+  const status = gmailStatus(error);
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return true;
+  if (status !== 403) return false;
+  const reasons = ((error as { errors?: { reason?: string }[] })?.errors ?? []).map((item) => item.reason);
+  return reasons.some((reason) => reason === "rateLimitExceeded" || reason === "userRateLimitExceeded");
+}
 
 async function getMetadata(gmail: gmail_v1.Gmail, id: string) {
-  const { data } = await gmail.users.messages.get({
-    userId: "me", id, format: "metadata", metadataHeaders: LIST_HEADERS,
-  });
-  return data;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { data } = await gmail.users.messages.get({
+        userId: "me", id, format: "metadata", metadataHeaders: LIST_HEADERS,
+      });
+      return data;
+    } catch (error) {
+      const delay = METADATA_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isTemporaryGmailError(error)) throw error;
+      await wait(delay + Math.random() * 200); // spread out retries that failed together
+    }
+  }
+}
+
+/**
+ * Metadata of many messages, at most METADATA_CONCURRENCY at a time (a new read starts as
+ * soon as one finishes). A message deleted after the list was made (404) is left out instead
+ * of failing the whole list; any other lasting failure still fails the request.
+ */
+async function getMetadataFor(gmail: gmail_v1.Gmail, ids: readonly string[]) {
+  const messages = new Map<string, gmail_v1.Schema$Message>();
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++];
+      try {
+        messages.set(id, await getMetadata(gmail, id));
+      } catch (error) {
+        if (gmailStatus(error) !== 404) throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(METADATA_CONCURRENCY, ids.length) }, worker));
+  return messages;
 }
 
 function isReceivedMessage(data: gmail_v1.Schema$Message) {
   return !data.labelIds?.some((label) => ["SENT", "DRAFT", "SPAM", "TRASH"].includes(label));
-}
-
-async function getSummaryMetadata(gmail: gmail_v1.Gmail, ids: string[]) {
-  const messages = new Map<string, gmail_v1.Schema$Message>();
-  for (let offset = 0; offset < ids.length; offset += SUMMARY_METADATA_CONCURRENCY) {
-    await Promise.all(ids.slice(offset, offset + SUMMARY_METADATA_CONCURRENCY).map(async (id) => {
-      try {
-        messages.set(id, await getMetadata(gmail, id));
-      } catch (error) {
-        // A permanently deleted message can still have a stored priority.
-        if ((error as { code?: unknown })?.code !== 404) throw error;
-      }
-    }));
-  }
-  return messages;
 }
 
 const SUMMARY_PENDING_LIMIT = 20;
@@ -52,12 +88,12 @@ async function loadSummary(gmail: gmail_v1.Gmail, userId: number) {
   const recentIds = (data.messages ?? []).flatMap(({ id }) => id ? [id] : []);
   const [storedPriorities, analysed, items] = await Promise.all([getStoredPriorities(userId, recentIds), getAnalysedMessageIds(userId, recentIds), listTodoItems(userId)]);
   // New mail still gets its provisional priority label, as in every other list.
-  const unlabelled = await getSummaryMetadata(gmail, recentIds.filter((id) => !storedPriorities.has(id)));
+  const unlabelled = await getMetadataFor(gmail, recentIds.filter((id) => !storedPriorities.has(id)));
   await getOrAssignPriorities([...unlabelled.values()].filter(isReceivedMessage), userId);
 
   const itemIds = items.map((item) => item.gmailMessageId);
   const [metadata, priorities, summaries] = await Promise.all([
-    getSummaryMetadata(gmail, itemIds.filter((id) => !unlabelled.has(id))), getStoredPriorities(userId, itemIds), getInsightSummaries(userId, itemIds),
+    getMetadataFor(gmail, itemIds.filter((id) => !unlabelled.has(id))), getStoredPriorities(userId, itemIds), getInsightSummaries(userId, itemIds),
   ]);
   const messages = items.flatMap((item) => {
     const message = unlabelled.get(item.gmailMessageId) ?? metadata.get(item.gmailMessageId);
@@ -184,7 +220,9 @@ export async function GET(request: NextRequest) {
       .then((result) => new Set((result.data.drafts ?? []).flatMap((draft) => (draft.message?.threadId ? [draft.message.threadId] : []))))
       .catch(() => new Set<string>());
 
-    const fetched = await Promise.all(messageIds.map((id) => getMetadata(gmail, id)));
+    // In Gmail's order; a message deleted in the meantime is simply missing.
+    const metadata = await getMetadataFor(gmail, messageIds);
+    const fetched = messageIds.flatMap((id) => metadata.get(id) ?? []);
     const priorities = await getOrAssignPriorities(
       fetched.filter((message) => !message.labelIds?.includes("DRAFT")),
       userId,
