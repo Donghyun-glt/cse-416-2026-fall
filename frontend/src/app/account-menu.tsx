@@ -5,6 +5,7 @@ import { GOOGLE_REAUTH_ATTEMPT_KEY } from "@/lib/google-login";
 import type { MailTheme } from "@/lib/mail-theme";
 import { initials } from "./mail-detail";
 import { AboutYouForm } from "./about-you-form";
+import { SummaryAnswers } from "./summary-answers";
 
 const icons = {
   chevrons: <path d="m8 9 4-4 4 4m-8 6 4 4 4-4" />,
@@ -134,7 +135,7 @@ export function AccountMenu({ profile, theme, onThemeChange }: {
         </div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
         {/* Mounted while Settings is open, so it always shows what is stored now. */}
-        {settingsOpen && <AboutYouForm />}
+        {settingsOpen && <><AboutYouForm /><SummaryAnswers /></>}
       </dialog>
     </>
   );

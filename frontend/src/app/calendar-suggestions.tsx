@@ -5,6 +5,7 @@ import type { MailAnalysis } from "@/lib/mail-analysis";
 import type { Priority } from "@/lib/mail-priority";
 import { candidateKeys, type CalendarSuggestion } from "@/lib/calendar-suggestion";
 import { calendarInstant } from "@/lib/calendar-time";
+import { deviceDay, summarySection } from "@/lib/summary-sections";
 
 const errorMessages: Record<string, string> = {
   calendar_api_disabled: "Enable the Google Calendar API in your Google Cloud project.",
@@ -133,13 +134,15 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
   const [candidates, setCandidates] = useState<CalendarSuggestion[]>([]);
   const [eventStates, setEventStates] = useState<Record<string, EventState>>({});
   // This message's place on the Summary tab (null = not listed). Separate from its priority.
-  const [todo, setTodo] = useState<{ status: "open" | "done" | "not_relevant"; task: string } | null>(null);
+  const [todo, setTodo] = useState<{ status: "open" | "done" | "not_relevant"; task: string; dueDate: string | null; reasons: string[] } | null>(null);
+  // Listed there now: open, and dated today or later, waiting for a reply, or added by hand.
+  const inSummary = todo?.status === "open" && summarySection({ dueDate: todo.dueDate ?? null, reasons: todo.reasons ?? [] }, deviceDay()) !== null;
   const [todoBusy, setTodoBusy] = useState(false);
   const markTodo = async (status: "open" | "done") => {
     if (todoBusy) return;
     setTodoBusy(true);
     try {
-      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}/todo`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const response = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}/todo`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, today: deviceDay() }) });
       const data = await response.json().catch(() => null) as { todo?: typeof todo } | null;
       if (response.ok) setTodo(data?.todo ?? null);
     } finally { setTodoBusy(false); }
@@ -178,8 +181,8 @@ export function CalendarSuggestions({ messageId, onAnalyzedPriority }: { message
       {analysis.reviewNotes.map((note, index) => <p key={index} className="rounded-lg bg-mail-warning-tint p-3 text-xs text-mail-warning">{note}</p>)}
     </>}
     {analysis && <div className="flex items-center justify-between gap-3 border-t border-mail-line pt-3 text-xs">
-      <span className="min-w-0 text-mail-secondary">{todo?.status === "open" ? <>In Summary{todo.task ? <>: <span className="font-semibold text-foreground">{todo.task}</span></> : ""}</> : todo?.status === "done" ? "Marked done in Summary" : "Not in Summary"}</span>
-      <button type="button" disabled={todoBusy} onClick={() => void markTodo(todo?.status === "open" ? "done" : "open")} className="shrink-0 rounded-lg border border-mail-line px-2.5 py-1 font-semibold text-mail-secondary hover:bg-mail-muted-surface disabled:opacity-50">{todo?.status === "open" ? "Mark done" : "Add to Summary"}</button>
+      <span className="min-w-0 text-mail-secondary">{inSummary ? <>In Summary{todo.task ? <>: <span className="font-semibold text-foreground">{todo.task}</span></> : ""}</> : todo?.status === "done" ? "Marked done in Summary" : "Not in Summary"}</span>
+      <button type="button" disabled={todoBusy} onClick={() => void markTodo(inSummary ? "done" : "open")} className="shrink-0 rounded-lg border border-mail-line px-2.5 py-1 font-semibold text-mail-secondary hover:bg-mail-muted-surface disabled:opacity-50">{inSummary ? "Mark done" : "Add to Summary"}</button>
     </div>}
     <div className="border-t border-mail-line pt-3"><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-mail-accent">Suggested events</h3>{status && <p role="status" className="text-xs text-mail-secondary">{status}</p>}</div>
     {failed && <button onClick={() => setRetry((value) => value + 1)} className="text-xs text-mail-accent underline">Retry analysis</button>}

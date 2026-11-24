@@ -8,7 +8,7 @@ import { emailBodyToText } from "@/lib/reply-draft";
 import { generateText, GeminiError, geminiModel } from "@/lib/gemini";
 import { decideTodo, profileForPrompt } from "@/lib/summary-todo";
 import { ANALYSIS_VERSION, analysisPrompt, analysisSchema, validateMailAnalysis, type AnalysisContext } from "@/lib/mail-analysis";
-import { createTodoItem, getCalendarEventStates, getMessageInsight, getTodoItem, getUserAbout, recordPriority, saveMessageInsight, upsertUser, type CalendarEventState, type TodoItem } from "@/lib/mailflow-db";
+import { createTodoItem, getCalendarEventStates, getMessageInsight, getTodoItem, getUserAbout, listSummaryAnswers, recordPriority, saveMessageInsight, upsertUser, type CalendarEventState, type TodoItem } from "@/lib/mailflow-db";
 
 // A message is analysed once. The validated result (summary, suggested events, review
 // notes) is stored per user + message and returned as-is afterwards, so its category
@@ -77,8 +77,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // The user's own Settings entries, read-only here: analysis may use them but never writes them.
     const about = session.userId === null ? null : await getUserAbout(session.userId).catch(() => null);
     const recipientProfile = profileForPrompt(about);
-    const context: AnalysisContext = { recipientProfile, sentAt, now: new Date().toISOString(), recipient, from: mail.from, to: mail.to, cc: mail.cc, timeZone, superseded, truncated: fullSource.length > source.length, automated: Boolean(mail.unsubscribeUrl) || /no-?reply|notification/i.test(mail.from) };
-    const key = createHash("sha256").update(JSON.stringify([ANALYSIS_VERSION, geminiModel(), recipient, id, source, sentAt, timeZone, superseded, recipientProfile])).digest("hex");
+    // What they answered before when Summary asked "Is this for you?" (also read-only here).
+    const answers = session.userId === null ? [] : await listSummaryAnswers(session.userId).catch(() => []);
+    const context: AnalysisContext = { recipientProfile, ...(answers.length > 0 ? { recipientAnswers: answers } : {}), sentAt, now: new Date().toISOString(), recipient, from: mail.from, to: mail.to, cc: mail.cc, timeZone, superseded, truncated: fullSource.length > source.length, automated: Boolean(mail.unsubscribeUrl) || /no-?reply|notification/i.test(mail.from) };
+    const key = createHash("sha256").update(JSON.stringify([ANALYSIS_VERSION, geminiModel(), recipient, id, source, sentAt, timeZone, superseded, recipientProfile, answers])).digest("hex");
     const raw = await analyze(source, context, key);
     const analysis = validateMailAnalysis(raw, source, context);
     // Classification failure/storage failure must not turn into a false "no event".
@@ -101,7 +103,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // Summary tab: a separate decision from the priority recorded below. Neither reads the other.
       if (!superseded) {
         try {
-          const decision = decideTodo((raw as { todo?: unknown }).todo, { source, sentAt, now: new Date(context.now), timeZone, automated: context.automated, about, events: analysis.candidates });
+          const decision = decideTodo((raw as { todo?: unknown }).todo, { source, sentAt, now: new Date(context.now), timeZone, automated: context.automated, about, answers, events: analysis.candidates });
           if (decision) await createTodoItem({ userId, gmailMessageId: id, ...decision });
           todo = await getTodoItem(userId, id);
         } catch { console.error("Summary to-do could not be stored"); }

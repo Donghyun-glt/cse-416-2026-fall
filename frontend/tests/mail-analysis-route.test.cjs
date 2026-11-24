@@ -27,7 +27,7 @@ function handler({ signedOut = false, superseded = false, db = { insights: new M
   '@/lib/mail-analysis': analysis,
   '@/lib/summary-todo': loadTodo(),
   '@/lib/mailflow-db': {
-   getUserAbout: async () => null, createTodoItem: async (item) => { db.todos.set(item.gmailMessageId, { ...item, status: 'open' }); }, getTodoItem: async (user, id) => db.todos.get(id) ?? null,
+   getUserAbout: async () => null, listSummaryAnswers: async () => [], createTodoItem: async (item) => { db.todos.set(item.gmailMessageId, { ...item, status: 'open' }); }, getTodoItem: async (user, id) => db.todos.get(id) ?? null,
    upsertUser: async () => 1, recordPriority: async (input) => { saved = input; return 'low'; },
    getMessageInsight: async (user, id) => db.insights.get(`${user}:${id}`) ?? null,
    saveMessageInsight: async ({ userId, gmailMessageId, analysis: value }) => { const key = `${userId}:${gmailMessageId}`; if (db.insights.has(key)) return false; db.insights.set(key, JSON.parse(JSON.stringify(value))); return true; },

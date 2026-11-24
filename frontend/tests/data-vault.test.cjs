@@ -48,7 +48,7 @@ test("lookup tokens match the same text for one user without revealing it", asyn
 
 test("every content column is written through the vault, never as plain text", () => {
   const db = readFileSync(resolve(__dirname, "../src/lib/mailflow-db.ts"), "utf8");
-  for (const column of ["reply_drafts.draft", "reply_panel_states.draft", "reply_panel_states.instructions", "message_insights.analysis", "calendar_event_states.details", "user_about.", "todo_items.task"]) {
+  for (const column of ["reply_drafts.draft", "reply_panel_states.draft", "reply_panel_states.instructions", "message_insights.analysis", "calendar_event_states.details", "user_about.", "todo_items.task", "todo_items.triage", "summary_answers.text"]) {
     assert.ok(new RegExp(`seal(Json)?\\(.*\`?${column.replace(".", "\\.")}`).test(db), `${column} must be sealed`);
   }
   assert.doesNotMatch(db, /JSON\.stringify\(input\.(analysis|details)\)/);

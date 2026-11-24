@@ -66,13 +66,20 @@ export default function PrivacyPolicy() {
           </li>
           <li>
             <strong>Summary items:</strong> for messages that need something from you, a one-line description of the task, its
-            deadline if the email states one, and whether you marked it done.
+            deadline if the email states one, and whether you marked it done. When MailFlow is unsure a message concerns
+            you, it also keeps how the email describes its audience and kind, so it can ask you.
+          </li>
+          <li>
+            <strong>Your &quot;Is this for you?&quot; answers:</strong> when you answer that question on the Summary tab,
+            MailFlow may remember your yes or no together with that audience or kind of mail (for example, &quot;No: mail
+            for TSM majors&quot;), so it does not ask again. Usually nothing is kept. These never change your About-you
+            details, they are sent to the AI provider like those details, and you can see and remove them in Settings.
           </li>
           <li><strong>Sign-in session:</strong> the OAuth tokens Google issues, encrypted in our database and used to make Gmail and Google Calendar requests for you, together with an opaque session cookie in your browser that lasts up to 7 days.</li>
         </ul>
         <p>
-          The content listed above (AI summaries and suggested events, reply drafts, your edits, your About-you answers
-          and task descriptions) is encrypted before it is stored, with a key that is kept outside the database and is
+          The content listed above (AI summaries and suggested events, reply drafts, your edits, your About-you answers,
+          task descriptions and remembered Summary answers) is encrypted before it is stored, with a key that is kept outside the database and is
           different for every account. People who can read the database, including MailFlow&apos;s developers, see only
           ciphertext for it. Your email address, Gmail message IDs, priority labels, dates and done/not-done states are
           stored unencrypted so the app can look them up.

@@ -1,6 +1,7 @@
 import type { Priority, PrioritySignals } from "./mail-priority";
 import { query, withTransaction } from "./postgres";
 import { ABOUT_FIELDS, roleText, type UserAbout } from "./user-about";
+import type { SummaryAnswer, TodoTriage } from "./summary-todo";
 import { lookupToken, open, openJson, seal, sealJson } from "./data-vault";
 
 // Content columns (drafts, AI readings, edited event details, About-you answers, task
@@ -297,12 +298,13 @@ const TODO_COLUMNS = "gmail_message_id, task, to_char(due_date, 'YYYY-MM-DD') AS
 const todoItem = (userId: number, row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: open(userId, `todo_items.task:${row.gmail_message_id}`, row.task) ?? "", dueDate: row.due_date, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
 
 /** Lists a message on the Summary tab the first time it is analysed. Never changes an existing row. */
-export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean }) {
+export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; triage?: TodoTriage | null }) {
   await query(`
-    INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience)
-    VALUES ($1, $2, $3, $4::date, $5::text[], $6)
+    INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience, triage)
+    VALUES ($1, $2, $3, $4::date, $5::text[], $6, $7)
     ON CONFLICT (user_id, gmail_message_id) DO NOTHING
-  `, [input.userId, input.gmailMessageId, input.task ? seal(input.userId, `todo_items.task:${input.gmailMessageId}`, input.task) : "", input.dueDate, input.reasons, input.confirmAudience]);
+  `, [input.userId, input.gmailMessageId, input.task ? seal(input.userId, `todo_items.task:${input.gmailMessageId}`, input.task) : "", input.dueDate, input.reasons, input.confirmAudience,
+    input.triage ? seal(input.userId, `todo_items.triage:${input.gmailMessageId}`, JSON.stringify(input.triage)) : ""]);
 }
 
 export async function getTodoItem(userId: number, gmailMessageId: string): Promise<TodoItem | null> {
@@ -310,26 +312,88 @@ export async function getTodoItem(userId: number, gmailMessageId: string): Promi
   return result.rows[0] ? todoItem(userId, result.rows[0]) : null;
 }
 
-/** Everything still open, plus what was finished in the last two weeks (so it can be undone). */
+/**
+ * What the Summary tab can show: open items that are dated today or later, wait for a
+ * reply or were added by hand, plus what was finished in the last 7 days (so it can be
+ * undone). An item whose date has passed is not returned; the one-day margin covers time
+ * zones ahead of the database, and the list applies the user's own calendar day.
+ */
 export async function listTodoItems(userId: number): Promise<TodoItem[]> {
   const result = await query<TodoRow>(`
-    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'open')
+    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'open'
+      AND (due_date >= CURRENT_DATE - 1 OR 'reply' = ANY(reasons) OR 'manual' = ANY(reasons)))
     UNION ALL
-    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'done' AND updated_at > NOW() - INTERVAL '14 days' ORDER BY updated_at DESC LIMIT 20)
+    (SELECT ${TODO_COLUMNS}, updated_at FROM todo_items WHERE user_id = $1 AND status = 'done' AND updated_at > NOW() - INTERVAL '7 days' ORDER BY updated_at DESC LIMIT 20)
   `, [userId]);
   return result.rows.map((row) => todoItem(userId, row));
 }
 
-/** The user's own choice: done, not relevant, or (re)opened. Opening a message with no row adds it by hand. */
-export async function setTodoStatus(userId: number, gmailMessageId: string, status: TodoStatus) {
+/**
+ * The user's own choice: done, not relevant, or (re)opened. Opening a message with no row
+ * adds it by hand; so does reopening one that would otherwise not be shown (no date ahead
+ * as of `today`, the user's calendar day, and no reply wanted), so it cannot vanish again.
+ */
+export async function setTodoStatus(userId: number, gmailMessageId: string, status: TodoStatus, today?: string) {
   await query(`
     INSERT INTO todo_items (user_id, gmail_message_id, reasons, status)
     VALUES ($1, $2, ARRAY['manual'], $3)
     ON CONFLICT (user_id, gmail_message_id) DO UPDATE SET
       status = EXCLUDED.status,
-      reasons = CASE WHEN EXCLUDED.status = 'open' AND cardinality(todo_items.reasons) = 0 THEN ARRAY['manual'] ELSE todo_items.reasons END,
+      reasons = CASE WHEN EXCLUDED.status = 'open' AND NOT ('manual' = ANY(todo_items.reasons)) AND NOT ('reply' = ANY(todo_items.reasons))
+        AND (todo_items.due_date IS NULL OR todo_items.due_date < COALESCE($4::date, CURRENT_DATE))
+        THEN array_append(todo_items.reasons, 'manual') ELSE todo_items.reasons END,
       updated_at = NOW()
-  `, [userId, gmailMessageId, status]);
+  `, [userId, gmailMessageId, status, today ?? null]);
+}
+
+/**
+ * The user answered "Is this for you?": yes keeps the item and stops asking, no takes it
+ * off the list. Returns false when there was no open question to answer.
+ */
+export async function answerTodoAudience(userId: number, gmailMessageId: string, forMe: boolean) {
+  const result = await query(`
+    UPDATE todo_items SET confirm_audience = FALSE, status = CASE WHEN $3 THEN status ELSE 'not_relevant' END, updated_at = NOW()
+    WHERE user_id = $1 AND gmail_message_id = $2 AND status = 'open' AND confirm_audience
+  `, [userId, gmailMessageId, forMe]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** How the email described its audience and kind, for an item the app was unsure about. */
+export async function getTodoTriage(userId: number, gmailMessageId: string): Promise<TodoTriage | null> {
+  const result = await query<{ triage: string }>("SELECT triage FROM todo_items WHERE user_id = $1 AND gmail_message_id = $2", [userId, gmailMessageId]);
+  const stored = result.rows[0]?.triage ? open(userId, `todo_items.triage:${gmailMessageId}`, result.rows[0].triage) : null;
+  if (!stored) return null;
+  try {
+    const value = JSON.parse(stored) as Partial<TodoTriage>;
+    return { audience: typeof value.audience === "string" ? value.audience : "", kind: typeof value.kind === "string" ? value.kind : "" };
+  } catch { return null; }
+}
+
+/** The user's remembered "Is this for you?" answers, oldest first. */
+export async function listSummaryAnswers(userId: number): Promise<SummaryAnswer[]> {
+  const result = await query<{ id: string; answer: "yes" | "no"; about: "audience" | "kind"; text: string }>(`
+    SELECT id::text AS id, answer, about, text FROM summary_answers WHERE user_id = $1 ORDER BY updated_at, id
+  `, [userId]);
+  return result.rows.flatMap((row) => { const text = open(userId, "summary_answers.text", row.text); return text ? [{ id: `a${row.id}`, answer: row.answer, about: row.about, text }] : []; });
+}
+
+const SUMMARY_ANSWER_LIMIT = 20;
+/** Remembers one answer. A newer answer about the same audience or kind replaces the older one; only the latest few are kept. */
+export async function saveSummaryAnswer(userId: number, input: { answer: "yes" | "no"; about: "audience" | "kind"; text: string }) {
+  await query(`
+    INSERT INTO summary_answers (user_id, answer, about, text, text_token)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (user_id, about, text_token) DO UPDATE SET answer = EXCLUDED.answer, text = EXCLUDED.text, updated_at = NOW()
+  `, [userId, input.answer, input.about, seal(userId, "summary_answers.text", input.text), lookupToken(userId, "summary_answers.text", input.text.toLowerCase())]);
+  await query(`
+    DELETE FROM summary_answers WHERE user_id = $1 AND id IN (SELECT id FROM summary_answers WHERE user_id = $1 ORDER BY updated_at DESC, id DESC OFFSET $2)
+  `, [userId, SUMMARY_ANSWER_LIMIT]);
+}
+
+/** Removes one remembered answer (id as listed), or all of them when no id is given. */
+export async function deleteSummaryAnswers(userId: number, id?: string) {
+  if (id === undefined) await query("DELETE FROM summary_answers WHERE user_id = $1", [userId]);
+  else await query("DELETE FROM summary_answers WHERE user_id = $1 AND id = $2::bigint", [userId, id.replace(/^a/, "")]);
 }
 
 /** One reason is dealt with (the reply was sent, the event was decided). The item is done when none is left. */
