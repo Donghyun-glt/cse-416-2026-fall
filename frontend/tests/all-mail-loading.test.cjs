@@ -100,3 +100,41 @@ test("Summary lists open to-do items whatever their priority, and reports recent
   assert.deepEqual(body.pending, ["fresh"]); // And is reported so the client can have it analysed.
   assert.equal(body.nextPageToken, undefined);
 });
+
+test("Search text goes to Gmail's own search within the current mailbox", async () => {
+  const requests = [];
+  const gmail = {
+    users: {
+      getProfile: async () => ({ data: { emailAddress: "demo@example.com" } }),
+      messages: {
+        list: async (options) => { requests.push(options); return { data: { messages: [] } }; },
+        get: async ({ id }) => ({ data: { id, labelIds: [], payload: { headers: [] } } }),
+      },
+      drafts: { list: async () => ({ data: { drafts: [] } }) },
+    },
+  };
+  const route = loadRoute(gmail);
+
+  // Inbox keeps its label and adds the search (and the other filters) to Gmail's query.
+  await route(`mode=inbox&unread=1&q=${encodeURIComponent("  from:prof invoice  ")}`);
+  assert.deepEqual([...requests.at(-1).labelIds], ["INBOX"]);
+  assert.equal(requests.at(-1).q, "is:unread from:prof invoice");
+
+  // All Emails normally leaves out sent mail, but a search includes it, as Gmail's search does.
+  await route("mode=all");
+  assert.equal(requests.at(-1).q, "-in:sent");
+  await route("mode=all&q=invoice");
+  assert.equal(requests.at(-1).q, "invoice");
+
+  // Spam and Trash are searched inside themselves.
+  await route("mode=trash&q=invoice");
+  assert.deepEqual([...requests.at(-1).labelIds], ["TRASH"]);
+  assert.equal(requests.at(-1).includeSpamTrash, true);
+  assert.equal(requests.at(-1).q, "invoice");
+
+  // The Daily Briefing ignores search text, and an overlong search is cut short.
+  await route(`after=${Date.now() - 1000}&q=invoice`);
+  assert.doesNotMatch(requests.at(-1).q, /invoice/);
+  await route(`mode=inbox&q=${"a".repeat(800)}`);
+  assert.equal(requests.at(-1).q.length, 500);
+});

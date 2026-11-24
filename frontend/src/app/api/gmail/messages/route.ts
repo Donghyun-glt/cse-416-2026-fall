@@ -95,6 +95,9 @@ export async function GET(request: NextRequest) {
     // Optional mailbox filters, applied by Gmail's own search.
     const onlyAttachments = request.nextUrl.searchParams.get("attachment") === "1";
     const onlyUnread = request.nextUrl.searchParams.get("unread") === "1";
+    // Search bar text, handed to Gmail's own search within the current mailbox, so
+    // the message body is searched too and operators such as from: or before: work.
+    const search = (request.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 500);
     const requestedPageToken = request.nextUrl.searchParams.get("pageToken") ?? undefined;
 
     const oauth2Client = createGoogleOAuthClient();
@@ -137,8 +140,9 @@ export async function GET(request: NextRequest) {
     // Like Gmail: "Inbox" is only mail that still carries the INBOX label, so
     // archiving a message removes it from that view. "All Emails" is everything
     // you received (inbox + archived); mail you sent has its own Sent view.
-    // Spam and Trash are only listed in their own views.
-    const excludeSent = !isDailyBriefing && mailboxMode === "all";
+    // Spam and Trash are only listed in their own views. A search in All Emails
+    // includes sent mail too, as Gmail's search does.
+    const excludeSent = !isDailyBriefing && mailboxMode === "all" && !search;
 
     do {
       const list = await gmail.users.messages.list({
@@ -152,6 +156,7 @@ export async function GET(request: NextRequest) {
           excludeSent ? "-in:sent" : "",
           !isDailyBriefing && onlyAttachments ? "has:attachment" : "",
           !isDailyBriefing && onlyUnread ? "is:unread" : "",
+          !isDailyBriefing ? search : "",
         ].filter(Boolean).join(" ") || undefined,
       });
 
