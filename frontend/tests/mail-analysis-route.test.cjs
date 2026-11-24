@@ -12,7 +12,8 @@ function load(file, imports) {
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: exported, require: (name) => imports[name] ?? require(name), console, AbortSignal });
  return exported;
 }
-function handler({ signedOut = false, superseded = false, db = { insights: new Map(), states: new Map(), todos: new Map() } } = {}) {
+class GeminiError extends Error { constructor(message, status, code, retryable = false) { super(message); this.status = status; this.code = code; this.retryable = retryable; } }
+function handler({ signedOut = false, superseded = false, geminiFailure = null, db = { insights: new Map(), states: new Map(), todos: new Map() } } = {}) {
  let generations = 0, saved, gmailReads = 0;
  const source = 'Your account is locked. Reset your access now.';
  const raw = { relevance: 'recipient_action', stakes: 'high', reason: 'Access is blocked and requires action.', reasonEvidence: 'Your account is locked.', activeBlocker: true, blockerEvidence: 'Your account is locked.', keyPoints: [{ kind: 'action', text: 'Reset your access now.', evidence: 'Reset your access now.', owner: 'recipient', importance: 'critical', date: null, dateEvidence: '' }], candidates: [] };
@@ -23,7 +24,7 @@ function handler({ signedOut = false, superseded = false, db = { insights: new M
   googleapis: { google: { gmail: () => ({ users: { messages: { get: async () => { gmailReads++; return ({ data: { id: 'm1', threadId: 't1', labelIds: ['INBOX'] } }); } }, threads: { get: async () => ({ data: { messages: [{ id: superseded ? 'm2' : 'm1', internalDate: '2' }] } }) }, getProfile: async () => ({ data: { emailAddress: 'me@example.com' } }) } }), calendar: () => { throw new Error('Analysis must never write to Calendar'); } } },
   '@/lib/gmail-message': { parseGmailMessage: () => ({ subject: 'Notice', html: source, unsubscribeUrl: 'https://example.com/unsubscribe', date: '2026-11-14T00:00:00Z', from: 'noreply@example.com', to: 'me@example.com', cc: '' }) },
   '@/lib/reply-draft': { emailBodyToText: (body) => body },
-  '@/lib/gemini': { generateText: async () => { generations++; return JSON.stringify(raw); }, GeminiError: class extends Error {}, geminiModel: () => 'test' },
+  '@/lib/gemini': { generateText: async () => { generations++; if (geminiFailure) throw geminiFailure; return JSON.stringify(raw); }, GeminiError, geminiModel: () => 'test' },
   '@/lib/mail-analysis': analysis,
   '@/lib/summary-todo': loadTodo(),
   '@/lib/mailflow-db': {
@@ -68,4 +69,15 @@ test('a message is decided once: later opens return the stored insight and never
  assert.equal(stored.stored, true); assert.equal(stored.prioritySaved, false);
  assert.equal(stored.analysis.reason, fresh.analysis.reason); assert.equal(stored.analysis.keyPoints.length, 0);
  assert.equal(stored.eventStates.k.status, 'dismissed');
+});
+test('a briefly unavailable AI answers 503 with Retry-After so the browser asks again; a permanent failure does not', async () => {
+ const call = (failure) => handler({ geminiFailure: failure }).POST(request(), { params: Promise.resolve({ id: 'm1' }) });
+ const overloaded = await call(new GeminiError('The model is overloaded.', 503, 'request_failed', true));
+ assert.equal(overloaded.status, 503); assert.equal(overloaded.headers.get('Retry-After'), '5'); assert.equal((await overloaded.json()).error, 'request_failed');
+ const limited = await call(new GeminiError('Rate limit', 429, 'rate_limited'));
+ assert.equal(limited.status, 429); assert.equal(limited.headers.get('Retry-After'), '15');
+ const missingKey = await call(new GeminiError('GEMINI_API_KEY is not configured.', 500, 'not_configured'));
+ assert.equal(missingKey.status, 503); assert.equal(missingKey.headers.get('Retry-After'), null);
+ const rejected = await call(new GeminiError('Invalid schema', 400, 'request_failed'));
+ assert.equal(rejected.status, 502); assert.equal(rejected.headers.get('Retry-After'), null);
 });

@@ -21,7 +21,8 @@ async function analyze(source: string, context: AnalysisContext, key: string) {
   if (cached && cached.expires > Date.now()) return cached.raw;
   if (pending.has(key)) return pending.get(key)!;
   const work = (async () => {
-    const response = await generateText(analysisPrompt(source, context), { temperature: 0, maxOutputTokens: 6500, responseJsonSchema: analysisSchema, signal: AbortSignal.timeout(45000) });
+    // 45 s in all; one attempt may use 25 s, so a request Gemini holds while overloaded still leaves time to retry.
+    const response = await generateText(analysisPrompt(source, context), { temperature: 0, maxOutputTokens: 6500, responseJsonSchema: analysisSchema, signal: AbortSignal.timeout(45000), attemptTimeoutMs: 25000 });
     const raw: unknown = JSON.parse(response);
     validateMailAnalysis(raw, source, context); // Never cache malformed responses.
     if (cache.size >= 100) cache.delete(cache.keys().next().value!);
@@ -117,8 +118,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     } catch { console.error("Content analysis priority could not be saved"); }
     return NextResponse.json({ analysis, candidates: analysis.candidates, eventStates, todo, priority, prioritySaved, version: ANALYSIS_VERSION }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof GeminiError) return NextResponse.json({ error: error.code }, { status: error.code === "rate_limited" ? 429 : 503 });
-    console.error("Email content analysis failed");
+    if (error instanceof GeminiError) {
+      // Gemini's own message (never email content) says why, e.g. "The model is overloaded".
+      console.error("Gemini email analysis failed", error.code, error.status, error.message);
+      // Retry-After tells the browser this is worth asking again (it waits that many
+      // seconds); a missing key or a rejected request is not.
+      if (error.code === "rate_limited") return NextResponse.json({ error: error.code }, { status: 429, headers: { "Retry-After": "15" } });
+      if (error.retryable) return NextResponse.json({ error: error.code }, { status: 503, headers: { "Retry-After": "5" } });
+      return NextResponse.json({ error: error.code }, { status: error.code === "not_configured" ? 503 : 502 });
+    }
+    // The error's kind and message only (never email content), so the cause shows in the log.
+    console.error("Email content analysis failed", error instanceof Error ? `${error.name}: ${error.message}` : String(error));
     return NextResponse.json({ error: "analysis_failed" }, { status: 502 });
   }
 }
