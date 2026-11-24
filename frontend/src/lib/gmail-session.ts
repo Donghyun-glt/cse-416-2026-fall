@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Credentials } from "google-auth-library";
 import { query } from "./postgres";
+import { createGoogleOAuthClient } from "./google";
 
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
@@ -84,10 +85,50 @@ const globalWithSessions = globalThis as typeof globalThis & { mailflowSessionCa
 const sessionCache = globalWithSessions.mailflowSessionCache
   ?? (globalWithSessions.mailflowSessionCache = { entries: new Map(), pending: new Map(), revoked: new Set() });
 
+// ----- Access token refresh -----
+// Google access tokens last an hour. The Google client refreshes an expired one by itself
+// before its first API call, but only in memory: every route builds a new client from the
+// stored tokens, so once the stored token had expired, every request asked Google for a new
+// one again (one extra round trip each) for the rest of the 7-day session. Instead the
+// session lookup refreshes once, saves the new token and hands it to every request.
+// The margin is larger than the Google client's own 5-minute early refresh plus the cache
+// time above, so a token handed out here never needs refreshing by the client.
+const REFRESH_MARGIN_MS = 10 * 60_000;
+
+function needsRefresh(tokens: Credentials) {
+  return Boolean(tokens.refresh_token) && typeof tokens.expiry_date === "number" && tokens.expiry_date - Date.now() < REFRESH_MARGIN_MS;
+}
+
+async function refreshTokens(sessionId: string, hash: string, tokens: Credentials): Promise<Credentials> {
+  let fresh: Credentials;
+  try {
+    const client = createGoogleOAuthClient();
+    client.setCredentials(tokens);
+    const { credentials } = await client.refreshAccessToken();
+    // Google normally sends no new refresh token; the one we have stays valid.
+    fresh = { ...tokens, ...credentials, refresh_token: credentials.refresh_token ?? tokens.refresh_token };
+  } catch (error) {
+    // Network trouble or a revoked grant: hand out the stored tokens as before, and the
+    // request fails or re-authorizes exactly as it did without this refresh.
+    console.error("Google access token refresh failed", error instanceof Error ? error.message : String(error));
+    return tokens;
+  }
+  try {
+    await query(`
+      UPDATE oauth_sessions
+      SET token_ciphertext = $2
+      WHERE session_hash = $1 AND expires_at > NOW()
+    `, [hash, sealGmailTokens(fresh, sessionId)]);
+  } catch {
+    console.error("Refreshed Google tokens could not be stored"); // Still used for this lookup.
+  }
+  return fresh;
+}
+
 async function lookupSession(sessionId: string): Promise<CachedSession | undefined> {
   const hash = sessionHash(sessionId);
   const cached = sessionCache.entries.get(hash);
-  if (cached && cached.until > Date.now()) return cached;
+  if (cached && cached.until > Date.now() && !needsRefresh(cached.tokens)) return cached;
   if (cached) sessionCache.entries.delete(hash);
   const inFlight = sessionCache.pending.get(hash);
   if (inFlight) return inFlight;
@@ -101,8 +142,9 @@ async function lookupSession(sessionId: string): Promise<CachedSession | undefin
       RETURNING token_ciphertext, user_id, expires_at
     `, [hash]);
     const row = result.rows[0];
-    const tokens = row ? openGmailTokens(row.token_ciphertext, sessionId) : undefined;
-    if (!row || !tokens) return undefined;
+    const stored = row ? openGmailTokens(row.token_ciphertext, sessionId) : undefined;
+    if (!row || !stored) return undefined;
+    const tokens = needsRefresh(stored) ? await refreshTokens(sessionId, hash, stored) : stored;
     const expiresAt = new Date(row.expires_at).getTime();
     // Never kept past the session's own expiry.
     const entry: CachedSession = { tokens, userId: row.user_id ?? null, until: Math.min(Date.now() + SESSION_CACHE_MS, Number.isFinite(expiresAt) ? expiresAt : 0) };

@@ -128,6 +128,7 @@ function sessionModule(secret, query = async () => ({ rows: [] })) {
     exports, Buffer, JSON, process: { env: { SESSION_SECRET: secret } },
     require(name) {
       if (name === "./postgres") return { query };
+      if (name === "./google") return { createGoogleOAuthClient: () => { throw new Error("no Google calls in these tests"); } };
       return require(name);
     },
   });

@@ -92,6 +92,16 @@ function startOfToday() {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 }
 
+/** A list as it last came from the server, remembered per mailbox, page, filters and search. */
+type CachedList = { messages: Mail[]; pending: string[]; nextPageToken: string | null; resultSizeEstimate: number };
+const LIST_CACHE_LIMIT = 30;
+function listKey(view: View, pageToken: string, onlyAttachments: boolean, onlyUnread: boolean, search: string) {
+  // The briefing is "today's mail", so it starts empty again after midnight.
+  if (view === "briefing") return `briefing|${startOfToday()}`;
+  if (view === "summary") return "summary";
+  return JSON.stringify([view, pageToken, onlyAttachments, onlyUnread, search]);
+}
+
 function greeting() {
   const hour = new Date().getHours();
   if (hour < 12) return "Good morning";
@@ -175,6 +185,11 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
   const [resultSizeEstimate, setResultSizeEstimate] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const requestRef = useRef<AbortController | null>(null);
+  // Lists already loaded in this tab, so going back to a mailbox shows it at once while a fresh
+  // copy loads in the background. Keyed by everything that changes what Gmail returns.
+  const listCacheRef = useRef(new Map<string, CachedList>());
+  /** The cache key of the list on screen, or null while another list is loading. */
+  const shownListKeyRef = useRef<string | null>(null);
   const bodyCacheRef = useRef(new Map<string, Pick<Mail, "html" | "attachments">>());
   const historyHandlerRef = useRef<(state: HistoryState, loadedMessages?: Mail[]) => void>(() => {});
   const pendingHistoryRef = useRef<HistoryState | null>(null);
@@ -191,12 +206,38 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
       ? current.map((message) => message.id === id ? { ...message, priority } : message).sort(comparePriority) : current);
   }, []);
 
+  const rememberList = useCallback((key: string, list: CachedList) => {
+    const cache = listCacheRef.current;
+    cache.delete(key); // re-inserted last, so the oldest list is the one dropped
+    cache.set(key, list);
+    if (cache.size > LIST_CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  }, []);
+  /** Puts a remembered list on screen without waiting for the network. */
+  const showCachedList = useCallback((key: string, list: CachedList) => {
+    shownListKeyRef.current = key;
+    setMessages(list.messages);
+    setSummaryPending(list.pending);
+    setNextPageToken(list.nextPageToken);
+    setResultSizeEstimate(list.resultSizeEstimate);
+    setSelectedIds(new Set());
+    setLoading(false);
+  }, []);
+
   const loadMessages = useCallback(async (targetView: View, showLoading = false, pageToken = "") => {
     if (targetView === "calendar") return;
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
-    if (showLoading) setLoading(true);
+    const key = listKey(targetView, pageToken, onlyAttachments, onlyUnread, mailboxSearch);
+    const cached = listCacheRef.current.get(key);
+    if (showLoading && cached) {
+      // Seen before: show it now, then refresh it quietly like the periodic sync does.
+      showCachedList(key, cached);
+      showLoading = false;
+    } else if (showLoading) {
+      shownListKeyRef.current = null;
+      setLoading(true);
+    }
     setError(null);
     try {
       const isPaged = targetView !== "briefing" && targetView !== "summary";
@@ -220,6 +261,8 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
       const nextMessages = data.messages ?? [];
       if (targetView === "summary") setSummaryPending(data.pending ?? []);
       setConnected(true);
+      rememberList(key, { messages: nextMessages, pending: data.pending ?? [], nextPageToken: data.nextPageToken ?? null, resultSizeEstimate: data.resultSizeEstimate ?? 0 });
+      shownListKeyRef.current = key;
       setMessages(nextMessages);
       if (showLoading) {
         setSelectedIds(new Set());
@@ -250,7 +293,15 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
         setLoading(false);
       }
     }
-  }, [allPageIndex, mailboxSearch, onlyAttachments, onlyUnread]);
+  }, [allPageIndex, mailboxSearch, onlyAttachments, onlyUnread, rememberList, showCachedList]);
+
+  // Changes made on screen (read, starred, archived, deleted...) are kept in the remembered
+  // copy too, so coming back does not briefly show the list as it was before them.
+  useEffect(() => {
+    const key = shownListKeyRef.current;
+    const entry = key ? listCacheRef.current.get(key) : undefined;
+    if (key && entry && entry.messages !== messages) listCacheRef.current.set(key, { ...entry, messages });
+  }, [messages]);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -323,8 +374,16 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
 
   const applyView = (next: View) => {
     pendingHistoryRef.current = null;
-    if (next !== view && (next === "summary" || view === "summary")) {
+    // A new mailbox opens unfiltered on its first page (reset below).
+    const nextKey = listKey(next, "", false, false, "");
+    const remembered = next !== view ? listCacheRef.current.get(nextKey) : undefined;
+    if (remembered) {
       requestRef.current?.abort();
+      showCachedList(nextKey, remembered);
+      setError(null);
+    } else if (next !== view && (next === "summary" || view === "summary")) {
+      requestRef.current?.abort();
+      shownListKeyRef.current = null;
       setMessages([]);
       setError(null);
       setLoading(next !== "calendar");
