@@ -61,6 +61,25 @@ When the user opens an email, MailFlow AI provides:
 - Shows a preview so the user can verify or edit the information.
 - Adds the approved event to **Google Calendar**.
 
+### 5. Summary
+
+- Collects the emails that still need something from the user: a task with a date, or a person waiting for a reply.
+- Groups them into **Today**, **Next 7 days or more**, and **Reply needed**, each with a **Done** button.
+- Uses the optional "About you" details from Settings to leave out mail meant for other groups, and asks **"Is this for you?"** when it is not sure.
+
+### 6. Compose
+
+- Writes a new email with recipients, formatting, and file attachments.
+- **Write with AI** drafts or revises the message from a short instruction.
+- Saves the message to Gmail Drafts automatically.
+
+### 7. Mailboxes and Settings
+
+- Inbox, Starred, Sent, Drafts, All Emails, Spam, and Trash, with search, filters, and actions on several messages at once.
+- A Google Calendar view.
+- Light and dark appearance, and a layout for phones.
+- The user can see and delete everything MailFlow has saved about them.
+
 ## Tech Stack
 
 MailFlow AI is one Next.js application: the React interface and the backend API routes live in the same codebase under `frontend/`. The earlier plan for a separate NestJS backend was dropped, as recorded in the Software Design Document.
@@ -77,8 +96,9 @@ MailFlow AI is one Next.js application: the React interface and the backend API 
 
 ## Live Beta
 
-<!-- TODO(team): paste the production URL here once the Vercel deployment is verified. -->
-Deployed on Vercel: **URL to be added**
+The beta is deployed on Vercel: **https://cse-416-2026-fall.vercel.app**
+
+Sign in with a Google account. While the Google app is in Testing mode, only accounts on the OAuth test-user list can sign in, so ask the team to add your address first. The [User Manual](USER_MANUAL.md) explains how to use the app.
 
 ## Developer Setup
 
@@ -191,6 +211,7 @@ We track bugs with **GitHub Issues**: https://github.com/Donghyun-glt/cse-416-20
 
 ## Documentation
 
+- [User Manual](USER_MANUAL.md)
 - [Backend API](Documents/API_Design/API.md)
 - [Software Design Document](Documents/Software_design/MailFlowAI-SoftwareDesign.docx)
 - [Data Design](Documents/Data_Design/MailFlowAI-DataDesign.docx)
@@ -206,14 +227,14 @@ http://localhost:3000/demo shows the interactive UI draft from the Data Design +
 | Feature | What it provides |
 | --- | --- |
 | **Minimal interface** | Displays only the information and actions the user needs. |
-| **Flexible reply controls** | Horizontal sliders adjust tone from **Friendly → Professional** and length from **Short → Detailed**. |
-| **Personalized writing style** | Optionally learns patterns from previously sent emails and reflects the user's style in future drafts. |
+| **Flexible reply controls** | Horizontal sliders adjust tone from **Casual → Formal** and length from **Short → Detailed**. |
+| **Personalization the user controls** | Asks the user directly instead of guessing: optional "About you" details in Settings and "Is this for you?" answers decide which emails appear in Summary. The user can see and delete everything that was saved. |
 | **Calendar awareness** | Recognizes dates and schedules in email, then prepares a Google Calendar event instead of making the user enter it manually. |
 | **Human approval** | Keeps replies and calendar events as suggestions until the user reviews and confirms them. |
 
 ## Future Improvements
 
-- Improve personalized writing-style adaptation.
+- Learn the user's writing style from sent mail and reflect it in reply drafts.
 - Improve priority and intent classification.
 - Support multiple Gmail accounts.
 - Add reply scheduling.
