@@ -73,10 +73,16 @@ export async function PATCH(
     };
     if (body.action === "priority") {
       if (!isPriority(body.priority)) return NextResponse.json({ error: "invalid_priority" }, { status: 400 });
-      const gmailProfile = await gmail.users.getProfile({ userId: "me" });
-      const userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+      // The session already knows its MailFlow user after the first list load. Only a session
+      // not linked yet needs the Gmail profile lookup and the user upsert (then it is linked).
       const sessionId = request.cookies.get("gmail_session")?.value;
-      if (sessionId) await attachGmailSessionToUser(sessionId, userId);
+      const session = sessionId ? await getGmailSessionWithUser(sessionId) : undefined;
+      let userId = session?.userId ?? null;
+      if (userId === null) {
+        const gmailProfile = await gmail.users.getProfile({ userId: "me" });
+        userId = await upsertUser(gmailProfile.data.emailAddress ?? "");
+        if (sessionId) await attachGmailSessionToUser(sessionId, userId);
+      }
       await setPriority(id, body.priority, userId);
       return NextResponse.json({ priority: body.priority });
     }
