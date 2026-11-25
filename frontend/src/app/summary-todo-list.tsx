@@ -109,7 +109,8 @@ export function SummaryTodoList({ messages, searchQuery = "", search, pending, l
   const open = items.filter((item) => item.status === "open" && item.section).sort((a, b) => (a.todo.dueDate ?? "9999").localeCompare(b.todo.dueDate ?? "9999") || Date.parse(b.message.date) - Date.parse(a.message.date));
   const done = items.filter((item) => item.status === "done");
   const dueToday = open.filter((item) => item.section === "today").length;
-  const replies = open.filter((item) => item.todo.reasons.includes("reply")).length;
+  // Counts the Reply needed section: an item that also has a date is listed under its date only.
+  const replies = open.filter((item) => item.section === "reply").length;
   const action = smallButton;
 
   const row = (item: (typeof items)[number]) => {
@@ -121,7 +122,8 @@ export function SummaryTodoList({ messages, searchQuery = "", search, pending, l
           <span className={`block text-sm font-bold leading-5 hover:text-mail-accent ${item.status === "done" ? "text-mail-muted line-through" : ""}`}>{todo.task || message.summary || message.subject || "(no subject)"}</span>
           <span className="mt-0.5 block truncate text-xs text-mail-muted">{formatSender(message.from)} — {message.subject || "(no subject)"}</span>
           {dated && todo.dueDate && <span className="mt-2 flex">
-            <span className={`rounded-xl px-2 py-1 text-[10px] font-bold ${item.status === "done" ? "bg-mail-muted-surface text-mail-muted" : item.section === "today" ? "bg-mail-danger-tint text-mail-danger" : "bg-mail-warning-tint text-mail-warning"}`}>{dueLabel(todo.dueDate)}</span>
+            <span className={`rounded-xl px-2 py-1 text-[10px] font-bold ${item.status === "done" ? "bg-mail-muted-surface text-mail-muted" : item.section === "today" ? "bg-mail-danger-tint text-mail-danger" : "bg-mail-warning-tint text-mail-warning"}`}
+              title={todo.dueIsEvent ? "The day of an event in this email, not a stated deadline" : undefined}>{todo.dueIsEvent && "Event · "}{dueLabel(todo.dueDate)}</span>
           </span>}
         </button>
         <span className="flex shrink-0 flex-wrap items-center gap-1.5">

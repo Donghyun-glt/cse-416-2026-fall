@@ -11,7 +11,8 @@ import { RefractionFilter, refractionStyle, useEdgeRefraction } from "./liquid-g
 import { COMPOSER_FONTS, EDITOR_CONTENT_CLASS, FormatToolbar } from "./format-toolbar";
 
 /** A message's place on the Summary tab, decided separately from its priority label. */
-export type MailTodo = { task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; status: "open" | "done" | "not_relevant" };
+/** `dueIsEvent`: the date is the day of an event the email mentions, not a deadline for the task. */
+export type MailTodo = { task: string; dueDate: string | null; dueIsEvent?: boolean; reasons: string[]; confirmAudience: boolean; status: "open" | "done" | "not_relevant" };
 
 export type Mail = {
   id: string;

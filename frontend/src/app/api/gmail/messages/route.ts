@@ -103,7 +103,7 @@ async function loadSummary(gmail: gmail_v1.Gmail, userId: number) {
       ...parseGmailMessage(message), html: "", partial: true,
       priority: priorities.get(item.gmailMessageId) ?? "fyi",
       summary: summaries.get(item.gmailMessageId),
-      todo: { task: item.task, dueDate: item.dueDate, reasons: item.reasons, confirmAudience: item.confirmAudience, status: item.status },
+      todo: { task: item.task, dueDate: item.dueDate, dueIsEvent: item.dueIsEvent, reasons: item.reasons, confirmAudience: item.confirmAudience, status: item.status },
     }];
   });
   return { messages, pending: recentIds.filter((id) => !analysed.has(id)).slice(0, SUMMARY_PENDING_LIMIT) };

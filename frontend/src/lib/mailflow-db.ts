@@ -374,19 +374,19 @@ export async function deleteUserAbout(userId: number) {
 }
 
 export type TodoStatus = "open" | "done" | "not_relevant";
-export type TodoItem = { gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; status: TodoStatus };
-type TodoRow = { gmail_message_id: string; task: string; due_date: string | null; reasons: string[]; confirm_audience: boolean; status: TodoStatus };
-const TODO_COLUMNS = "gmail_message_id, task, to_char(due_date, 'YYYY-MM-DD') AS due_date, reasons, confirm_audience, status";
-const todoItem = (userId: number, row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: open(userId, `todo_items.task:${row.gmail_message_id}`, row.task) ?? "", dueDate: row.due_date, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
+export type TodoItem = { gmailMessageId: string; task: string; dueDate: string | null; dueIsEvent: boolean; reasons: string[]; confirmAudience: boolean; status: TodoStatus };
+type TodoRow = { gmail_message_id: string; task: string; due_date: string | null; due_is_event: boolean; reasons: string[]; confirm_audience: boolean; status: TodoStatus };
+const TODO_COLUMNS = "gmail_message_id, task, to_char(due_date, 'YYYY-MM-DD') AS due_date, due_is_event, reasons, confirm_audience, status";
+const todoItem = (userId: number, row: TodoRow): TodoItem => ({ gmailMessageId: row.gmail_message_id, task: open(userId, `todo_items.task:${row.gmail_message_id}`, row.task) ?? "", dueDate: row.due_date, dueIsEvent: row.due_is_event, reasons: row.reasons, confirmAudience: row.confirm_audience, status: row.status });
 
 /** Lists a message on the Summary tab the first time it is analysed. Never changes an existing row. */
-export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; reasons: string[]; confirmAudience: boolean; triage?: TodoTriage | null }) {
+export async function createTodoItem(input: { userId: number; gmailMessageId: string; task: string; dueDate: string | null; dueIsEvent?: boolean; reasons: string[]; confirmAudience: boolean; triage?: TodoTriage | null }) {
   await query(`
-    INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience, triage)
-    VALUES ($1, $2, $3, $4::date, $5::text[], $6, $7)
+    INSERT INTO todo_items (user_id, gmail_message_id, task, due_date, reasons, confirm_audience, triage, due_is_event)
+    VALUES ($1, $2, $3, $4::date, $5::text[], $6, $7, $8)
     ON CONFLICT (user_id, gmail_message_id) DO NOTHING
   `, [input.userId, input.gmailMessageId, input.task ? seal(input.userId, `todo_items.task:${input.gmailMessageId}`, input.task) : "", input.dueDate, input.reasons, input.confirmAudience,
-    input.triage ? seal(input.userId, `todo_items.triage:${input.gmailMessageId}`, JSON.stringify(input.triage)) : ""]);
+    input.triage ? seal(input.userId, `todo_items.triage:${input.gmailMessageId}`, JSON.stringify(input.triage)) : "", Boolean(input.dueDate) && input.dueIsEvent === true]);
 }
 
 export async function getTodoItem(userId: number, gmailMessageId: string): Promise<TodoItem | null> {

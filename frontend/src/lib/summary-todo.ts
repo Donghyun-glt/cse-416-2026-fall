@@ -13,7 +13,8 @@ import type { UserAbout } from "./user-about";
 export type TodoReason = "task" | "reply" | "event" | "manual";
 /** How the email itself describes its audience and kind. Kept with an item the app was unsure about. */
 export type TodoTriage = { audience: string; kind: string };
-export type TodoDecision = { task: string; dueDate: string | null; reasons: TodoReason[]; confirmAudience: boolean; triage: TodoTriage | null };
+/** `dueIsEvent`: the date is the day of an event the email mentions, not a deadline it states for the task. */
+export type TodoDecision = { task: string; dueDate: string | null; dueIsEvent: boolean; reasons: TodoReason[]; confirmAudience: boolean; triage: TodoTriage | null };
 /** One remembered answer to "Is this for you?". `text` is always copied from a TodoTriage. */
 export type SummaryAnswer = { id: string; answer: "yes" | "no"; about: "audience" | "kind"; text: string };
 
@@ -113,14 +114,19 @@ export function decideTodo(raw: unknown, input: { source: string; sentAt: string
   }
 
   // Step 3: is there a date? Use the checked deadline (or day of attendance), else the first
-  // suggested event still ahead. A date that has passed is no longer something to do.
+  // suggested event still ahead; that one is marked (dueIsEvent) so the list does not show it
+  // as a deadline. A date that has passed is no longer something to do.
   const today = localDay(input.now, input.timeZone);
   let dueDate: string | null = null;
   if (taskOk && typeof todo.dueDate === "string" && grounded(todo.dueEvidence, source)) {
     const resolved = resolveEmailDate(todo.dueEvidence as string, input.sentAt, input.timeZone);
     if (resolved.date === todo.dueDate) dueDate = resolved.date;
   }
-  if (!dueDate && taskOk) dueDate = input.events.map((event) => event.date).sort().find((date) => date >= today) ?? null;
+  let dueIsEvent = false;
+  if (!dueDate && taskOk) {
+    dueDate = input.events.map((event) => event.date).sort().find((date) => date >= today) ?? null;
+    dueIsEvent = dueDate !== null;
+  }
   if (dueDate && dueDate < today) dueDate = null;
   if (!dueDate && !replyOk) return null;
 
@@ -128,7 +134,7 @@ export function decideTodo(raw: unknown, input: { source: string; sentAt: string
   if (taskOk) reasons.push("task");
   if (replyOk) reasons.push("reply");
   if (input.events.length > 0) reasons.push("event");
-  return { task: taskOk ? taskText : "Reply to this email", dueDate, reasons, confirmAudience: !sure, triage: !sure && (audience || kind) ? { audience, kind } : null };
+  return { task: taskOk ? taskText : "Reply to this email", dueDate, dueIsEvent, reasons, confirmAudience: !sure, triage: !sure && (audience || kind) ? { audience, kind } : null };
 }
 
 // "Is this for you?" answers. What is remembered is never free text from a model: it is

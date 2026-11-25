@@ -22,7 +22,7 @@ const cs = { role: "CS undergraduate", organization: "SUNY Korea", interests: ""
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("step 1: a real task is listed with its checked date, however far away it is", () => {
-  assert.deepEqual(plain(decideTodo(base, input())), { task: "Submit the internship form by December 4.", dueDate: "2026-12-04", reasons: ["task"], confirmAudience: false, triage: null });
+  assert.deepEqual(plain(decideTodo(base, input())), { task: "Submit the internship form by December 4.", dueDate: "2026-12-04", dueIsEvent: false, reasons: ["task"], confirmAudience: false, triage: null });
 });
 
 test("step 1: nothing asked means not listed; invented tasks, quotes and numbers are not trusted", () => {
@@ -39,6 +39,14 @@ test("step 1: a date in the body or a suggested calendar event does not list an 
   // Something the reader is expected to attend is listed, on the day of the event.
   const attend = decideTodo({ ...base, ask: "attendance", task: "Attend office hours.", taskEvidence: "Submit the internship form", dueDate: null, dueEvidence: "" }, input({ events }));
   assert.deepEqual(plain(attend.reasons), ["task", "event"]); assert.equal(attend.dueDate, "2026-11-25");
+  // That date is the event's day, not a deadline the email states, and is marked so.
+  assert.equal(attend.dueIsEvent, true);
+  // A deadline the email states wins over a suggested event and is not marked.
+  const stated = decideTodo(base, input({ events }));
+  assert.equal(stated.dueDate, "2026-12-04"); assert.equal(stated.dueIsEvent, false);
+  // A stated deadline that has passed is not replaced by a later event.
+  const passed = decideTodo({ ...base, needsReply: true, replyEvidence: "Can you confirm by reply?" }, input({ now: new Date("2026-12-10T00:00:00Z"), events: [{ title: "Office hours", date: "2026-12-20" }] }));
+  assert.equal(passed.dueDate, null); assert.equal(passed.dueIsEvent, false);
 });
 
 test("step 2: the user's profile removes mail addressed to another group, and only then", () => {
@@ -103,7 +111,7 @@ test("step 3: a dated item is listed by date; an undated one only when a person 
   assert.equal(decideTodo({ ...base, dueDate: null, dueEvidence: "" }, input()), null);
   assert.equal(decideTodo({ ...base, dueDate: "2026-12-05" }, input()), null); // A date the email does not state is dropped, leaving no date.
   const asks = { ...base, ask: "none", task: "", needsReply: true, replyEvidence: "Can you confirm by reply?" };
-  assert.deepEqual(plain(decideTodo(asks, input())), { task: "Reply to this email", dueDate: null, reasons: ["reply"], confirmAudience: false, triage: null });
+  assert.deepEqual(plain(decideTodo(asks, input())), { task: "Reply to this email", dueDate: null, dueIsEvent: false, reasons: ["reply"], confirmAudience: false, triage: null });
   assert.equal(decideTodo(asks, input({ automated: true })), null);
   // A task with a reply request keeps both, so it is still listed after its date.
   assert.deepEqual(plain(decideTodo({ ...base, needsReply: true, replyEvidence: "Can you confirm by reply?" }, input()).reasons), ["task", "reply"]);
