@@ -175,7 +175,7 @@ function BriefingCard({ message, insight, onOpen }: { message: Mail; insight: In
   const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
   const summarizing = insight === undefined;
   return <button type="button" onClick={() => onOpen(message)} style={{ viewTransitionName: `briefing-card-${message.id}` }}
-    className="group block w-full border-b border-mail-line bg-mail-surface/85 p-[18px] text-left transition first:rounded-t-xl last:rounded-b-xl last:border-b-0 hover:bg-mail-surface">
+    className={`group block w-full border-b border-mail-line p-[18px] text-left transition first:rounded-t-xl last:rounded-b-xl last:border-b-0 hover:bg-mail-surface ${message.unread ? "bg-mail-surface/85" : "bg-mail-read-surface/85 text-mail-read-text [--mail-muted:var(--mail-read-muted)]"}`}>
     <span className="flex items-center gap-2 text-[11px] text-mail-secondary">
       <span className={`min-w-0 flex-1 truncate ${message.unread ? "font-bold text-foreground" : ""}`}>{sender}</span>
       {summarizing && <span className="flex shrink-0 items-center gap-1 font-semibold text-mail-accent" title="MailFlow AI is reading this email">

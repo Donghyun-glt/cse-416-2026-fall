@@ -1003,8 +1003,10 @@ export function MailClient({ initialConnected, initialTheme, loginError }: {
               const seed = contact.match(/<([^>]+)>/)?.[1] ?? contact;
               const selected = selectedIds.has(message.id);
               const hasAttachment = message.attachments.some((attachment) => !attachment.inline);
+              // Opened mail sits on a gray row, as in Gmail. On phones a selected row shows the selection tint instead.
+              const readRow = message.unread ? "" : `bg-mail-read-surface text-mail-read-text [--mail-muted:var(--mail-read-muted)] ${selected ? "max-sm:bg-transparent" : ""}`;
               return <article key={message.id} className={`select-none border-b border-mail-line last:border-b-0 ${selected ? "max-sm:bg-mail-accent-tint/50" : ""}`} onMouseDown={(event) => { if (event.detail > 1) event.preventDefault(); }}>
-                <div className="flex items-center gap-1.5 rounded-xl px-2 py-[13px] transition hover:bg-mail-surface max-sm:gap-3 max-sm:px-1 max-sm:py-3 sm:gap-2">
+                <div className={`flex items-center gap-1.5 rounded-xl px-2 py-[13px] transition hover:bg-mail-surface max-sm:gap-3 max-sm:px-1 max-sm:py-3 sm:gap-2 ${readRow}`}>
                   <input type="checkbox" checked={selected} onChange={() => toggleSelection(message.id)} aria-label={`Select ${message.subject}`} className="h-4 w-4 shrink-0 cursor-pointer accent-[#5944d8] max-sm:hidden" />
                   {/* Phones: tapping the avatar selects the row (a checkbox is too small for a finger). */}
                   <button type="button" onClick={() => toggleSelection(message.id)} aria-pressed={selected} aria-label={`Select ${message.subject}`} className="shrink-0 self-start sm:hidden">

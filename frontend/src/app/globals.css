@@ -6,9 +6,11 @@
   --mail-surface: #fff;
   --mail-muted-surface: #f4f3f0;
   --mail-hover: #eeece8;
-  /* Opened mail in lists: a recessed row with quieter text. */
-  --mail-read-surface: #f4f3f0;
+  /* Opened mail in lists: a gray row, as in Gmail. Muted text goes a step darker on the
+     gray so it keeps its contrast. */
+  --mail-read-surface: #eceae5;
   --mail-read-text: #252521;
+  --mail-read-muted: #67645c;
   /* Space around an email's own (always light) page; only needed on a dark surface. */
   --mail-paper-pad: 0px;
   /* The email body sits straight on the page in light mode; dark mode gives it a white sheet. */
@@ -67,8 +69,9 @@
   --mail-surface: #201e29;
   --mail-muted-surface: #292634;
   --mail-hover: #332f40;
-  --mail-read-surface: #16151c;
-  --mail-read-text: #9d97ab;
+  --mail-read-surface: #292634;
+  --mail-read-text: #c5bfd2;
+  --mail-read-muted: #aaa3ba;
   --mail-paper-pad: 20px;
   --mail-paper: #fff;
   --mail-line: #3c3849;
