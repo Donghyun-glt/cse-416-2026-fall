@@ -1253,7 +1253,10 @@ export function MailDetail({ message, myEmail, deleting, error, position, total,
 
       {/* ---------- Right column: AI reply panel ---------- */}
       {showAiPanel && (
-        <aside className="mt-10 space-y-8 border-t border-mail-line pt-8 max-sm:contents lg:sticky lg:top-16 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
+        // Wide screens: the panel stays beside the message. When it is taller than the window it
+        // scrolls on its own (no scrollbar shown), so its lower part is reachable however long the
+        // message is; the bottom padding lets the last control clear the dock.
+        <aside className="mt-10 space-y-8 border-t border-mail-line pt-8 max-sm:contents lg:sticky lg:top-12 lg:-mr-4 lg:-mt-4 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:border-l lg:border-t-0 lg:pb-[120px] lg:pl-10 lg:pr-4 lg:pt-4 lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
           {/* Phones: a folded card above the message; "Show more" opens it. */}
           <div className={`relative max-sm:order-first max-sm:mb-5 max-sm:rounded-[17px] max-sm:border max-sm:border-mail-line max-sm:bg-mail-surface max-sm:p-4 ${insightsOpen ? "max-sm:pb-12" : "max-sm:max-h-[170px] max-sm:overflow-hidden"}`}>
             <CalendarSuggestions messageId={message.id} onAnalyzedPriority={onAnalyzedPriority} />
